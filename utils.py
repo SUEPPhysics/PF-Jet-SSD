@@ -12,8 +12,9 @@ import torch.nn as nn
 
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import OffsetImage
+from matplotlib.ticker import FixedLocator as Locator
 import matplotlib.font_manager
-from sklearn.metrics import average_precision_score, precision_recall_curve
+from sklearn.metrics import precision_recall_curve
 from ssd.generator import CalorimeterJetDataset
 from ssd.layers import *
 from torch.utils.data import DataLoader
@@ -76,12 +77,34 @@ class Plotting():
         with open('./plots/palette.json') as json_file:
             self.color_palette = json.load(json_file)
         shade = 'shade_700'
-        self.colors = [self.color_palette['red'][shade],
+        self.colors = [self.color_palette['black'],
+                       self.color_palette['red'][shade],
                        self.color_palette['blue'][shade],
                        self.color_palette['yellow'][shade],
                        self.color_palette['green'][shade]]
-        self.line_styles = ['solid', (0, (1, 3)), (0, (5, 5))]
-        self.markers = ["o", "v", "s"]
+        self.line_styles = [(0, ()),
+                            (0, (1, 4)),
+                            (0, (6, 4)),
+                            (0, (6, 7, 1, 7))]
+        self.markers = ["s", "v", "o"]
+
+    def average_precision_score(self, recall, precision):
+
+        def find_nearest(array, value):
+            if array[1] < (value - .01):
+                return None
+            idx = (np.abs(array - value)).argmin()
+            return idx
+
+        recall[0] = 1.
+        precision[0] = 0.
+
+        cum_ap = 0.
+        for i in [x / 10.0 for x in range(0, 11)]:
+            x = find_nearest(recall, i)
+            if x:
+                cum_ap += precision[x]
+        return cum_ap/11.
 
     def draw_loss(self,
                   data_train,
@@ -117,83 +140,103 @@ class Plotting():
                               jet_names):
         """Plots the precision recall curve"""
 
+        def find_nearest(array, value):
+            if array[1] < (value - .01):
+                return None
+            idx = (np.abs(array - value)).argmin()
+            return idx
+
         fig, ax = plt.subplots()
+        results_ap, results_pr3, results_pr5 = [], [], []
         for i, results in enumerate([results_base,
                                      results_fpn,
                                      results_twn,
                                      results_int8]):
             name = self.legend[i]
+            scores, truths = [], []
+            tmp_ap, tmp_pr3, tmp_pr5 = [], [], []
             for j, jet in enumerate(jet_names):
-                score = results[j][:, 3].numpy()
                 truth = results[j][:, 4].numpy()
+                score = results[j][:, 3].numpy()
+                truths = np.concatenate((truths, truth), axis=None)
+                scores = np.concatenate((scores, score), axis=None)
                 precision, recall, _ = precision_recall_curve(truth, score)
-                ap = average_precision_score(truth, score)
-                label = '{0}: {1} jets, AP: {2:.3f}'.format(name, jet, ap)
-                plt.plot(recall[1:],
-                         precision[1:],
-                         linestyle=self.line_styles[j],
-                         color=self.colors[i],
-                         label=label)
+                ap = self.average_precision_score(recall, precision)
+                tmp_ap.append(ap)
+                x = find_nearest(recall, 0.3)
+                if x is None:
+                    tmp_pr3.append(np.nan)
+                else:
+                    tmp_pr3.append(precision[x])
+                x = find_nearest(recall, 0.5)
+                if x is None:
+                    tmp_pr5.append(np.nan)
+                else:
+                    tmp_pr5.append(precision[x])
+            results_ap.append(tmp_ap)
+            results_pr3.append(tmp_pr3)
+            results_pr5.append(tmp_pr5)
 
-        plt.xlabel('Recall (TPR)', horizontalalignment='right', x=1.0)
-        plt.ylabel('Precision (PPV)', horizontalalignment='right', y=1.0)
+            precision, recall, _ = precision_recall_curve(truths, scores)
+            ap = self.average_precision_score(recall, precision)
+            print(r'{0}, AP: {1:.3f}'.format(name, ap))
+            label = r'{0}'.format(name)
+            plt.plot(recall[1:],
+                     precision[1:],
+                     linestyle=self.line_styles[i],
+                     linewidth=.5,
+                     markersize=0,
+                     color=self.colors[0],
+                     label=label)
+
+        plt.xlabel(r'Recall (TPR)', horizontalalignment='right', x=1.0)
+        plt.ylabel(r'Precision (PPV)', horizontalalignment='right', y=1.0)
         plt.xticks([0.2, 0.4, 0.6, 0.8, 1])
         plt.yticks([0.2, 0.4, 0.6, 0.8, 1])
-        ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
-        fig.savefig('{}/precision-recall-curve'.format(self.save_dir))
+        ax.legend(loc='lower right')
+        fig.savefig('{}/Precision-Recall-Curve'.format(self.save_dir))
         plt.close(fig)
+        return results_ap, results_pr3, results_pr5
 
-    def draw_precision_details(self,
-                               results_base,
-                               results_fpn,
-                               results_twn,
-                               results_int8,
-                               jet_names,
-                               nbins=11):
+    def draw_precision_details(self, gt, fpn, twn, int8, jet_names, nbins=11):
         """Plots the precision histogram at fixed recall"""
+        ylabel = 'PPV@R={}'.format(self.ref_recall)
+        xlabels = [r'$\eta$', r'$\phi$ [°]', r'$p_T^{SSD}$ [GeV/s]']
+        scales = [0.4, 0.5, 20]
+        idxs = [0, 1, 5]
+        ax_m = [6, 360, 1]
+        ax_s = [3, 0, 0]
 
-        legend_helper_network, legend_helper_type = [], []
-        for i, jet in enumerate(jet_names):
-            legend_helper_network.append(Line2D([], [],
-                                                linewidth=0,
-                                                markersize=4,
-                                                marker=self.markers[i],
-                                                color='black',
-                                                label='{} jets'.format(jet)))
+        for x, jet_name in enumerate(jet_names):
+            fig, axs = plt.subplots(3, 3, figsize=(10.5, 5.4))
+            for row, result in enumerate([fpn, twn, int8]):
+                for column, (i, l, ax_mul, ax_sub) in enumerate(
+                        zip(idxs, xlabels, ax_m, ax_s)):
 
-        for i in range(3):
-            legend_helper_type.append(Line2D([], [],
-                                             linewidth=2,
-                                             color=self.colors[i+1],
-                                             label=self.legend[i+1]))
+                    ax = axs[row][column]
 
-        for i, l, name, mul, sub in [(0, r'$\eta$', 'eta', 6, 3),
-                                     (1, r'$\phi$ [$\degree$]', 'phi', 360, 0),
-                                     (5, r'$p_T^{SSD}$ [GeV/s]', 'pt', 1, 0)]:
+                    if row == 2:
+                        ax.set_xlabel(l, horizontalalignment='right', x=1.0)
+                    if column == 0:
+                        ax.set_ylabel(ylabel,
+                                      horizontalalignment='right',
+                                      y=1.0)
 
-            fig, ax = plt.subplots()
-            plt.xlabel(l, horizontalalignment='right', x=1.0)
-            plt.ylabel('Precision (PPV) @ TPR={}'.format(self.ref_recall),
-                       horizontalalignment='right',
-                       y=1.0)
+                    # Fix binning across classes
+                    if i == 5:
+                        pt = gt[gt[:, 0] == x+1][:, 1].numpy()
+                        min_pt, max_pt = np.min(pt), np.max(pt)
+                        binning = np.logspace(np.log10(min_pt),
+                                              np.log10(max_pt),
+                                              nbins)[1:]
+                        ax.set_xscale("log")
+                        ax.set_xlim([min_pt, 1.1*max_pt])
+                        ax.set_ylim([0, 1.1])
+                    else:
+                        binning = np.linspace(0, 1, nbins)[1:]
+                        ax.set_xlim([0, 1])
+                        ax.set_ylim([0, 1.1])
 
-            # Fix binning across classes
-            if i == 5:
-                pt = results_base[:, 1].numpy()
-                min_pt, max_pt = np.min(pt), np.max(pt)
-                binning = np.logspace(np.log10(min_pt),
-                                      np.log10(max_pt),
-                                      nbins)[1:]
-                ax.set_xscale("log")
-            else:
-                binning = np.linspace(0, 1, nbins)[1:]
-                ax.set_xlim([0, 1])
-
-            for x, _ in enumerate(jet_names):
-                for index, result in enumerate([results_fpn,
-                                                results_twn,
-                                                results_int8]):
-                    color = self.colors[index+1]
                     score = result[x][:, 3].numpy()
                     truth = result[x][:, 4].numpy()
                     values = result[x][:, i].numpy()
@@ -217,133 +260,140 @@ class Plotting():
                     else:
                         xvalues = binning-binning[0]/2
 
-                    ax.plot(xvalues, v,
-                            color=color,
-                            marker=self.markers[x],
-                            linewidth=0,
-                            markersize=4)
-            if i == 0:
-                ticks = (ax.get_xticks()*mul-sub)
-                ticks = np.round_(ticks, decimals=2)
-                plt.xticks(ax.get_xticks(), ticks)
-            if i == 1:
-                ticks = (ax.get_xticks()*mul-sub)
-                ticks = ticks.astype(np.int32)
-                plt.xticks(ax.get_xticks(), ticks)
+                    ax.plot(xvalues,
+                            v,
+                            color=self.colors[0],
+                            marker=self.markers[0],
+                            linewidth=0)
 
-            # Add legend
-            plt.gca().add_artist(plt.legend(handles=legend_helper_type,
-                                            loc='upper left',
-                                            bbox_to_anchor=(0, -0.1)))
-            plt.gca().add_artist(plt.legend(handles=legend_helper_network,
-                                            loc='upper left',
-                                            bbox_to_anchor=(0.2, -0.1)))
+                    if i == 0:
+                        ticks = ax.get_xticks()*ax_mul-ax_sub
+                        ticks = np.round_(ticks, decimals=2)
+                        ax.xaxis.set_major_locator(Locator(ax.get_xticks()))
+                        ax.set_xticklabels(ticks)
+                    if i == 1:
+                        ticks = ax.get_xticks()*ax_mul-ax_sub
+                        ticks = ticks.astype(np.int32)
+                        ax.xaxis.set_major_locator(Locator(ax.get_xticks()))
+                        ax.set_xticklabels(ticks)
+                    plt.setp(ax.get_yticklabels(), visible=column == 0)
+                    plt.setp(ax.get_xticklabels(), visible=row == 2)
 
-            plt.savefig('{}/precision-{}'.format(self.save_dir, name))
+            plt.savefig('{}/Precision-{}'.format(self.save_dir, jet_name))
             plt.close(fig)
 
-    def draw_loc_delta(self,
-                       results_base,
-                       results_fpn,
-                       results_twn,
-                       results_int8,
-                       jet_names,
-                       nbins=11):
+    def draw_loc_delta(self, base, fpn, twn, int8, jet_names, nbins=11):
         """Plots the localization and regression error"""
+        xlabel = r'$p_T^{GEN}$ [GeV/s]'
+        ylabels = [r'$\eta-\eta^{GEN}$',
+                   r'$\phi-\phi^{GEN}$ [rad]',
+                   r'$|\frac{p_T}{p_T^{GEN}}|$']
+        scales = [0.4, 0.5, 20]
+        idxs = [2, 3, 4]
 
-        # Fix binning across classes
-        pt = results_base[:, 1].numpy()
-        min_pt, max_pt = np.min(pt), np.max(pt)
-        binning = np.logspace(np.log10(min_pt), np.log10(max_pt), nbins)[1:]
+        for x, jet_name in enumerate(jet_names):
+            fig, axs = plt.subplots(3, 4, figsize=(14, 5.4))
+            for row, (idx, ylabel, s) in enumerate(zip(idxs, ylabels, scales)):
+                # Fix binning across classes
+                pt = base[base[:, 0] == x+1][:, 1].numpy()
+                min_pt, max_pt = np.min(pt), np.max(pt)
+                binning = np.logspace(np.log10(min_pt),
+                                      np.log10(max_pt),
+                                      nbins)[1:]
+                for column, results in enumerate([base, fpn, twn, int8]):
 
-        # Fix legend helpers
-        legend_helper_network, legend_helper_type = [], []
-        for i, jet in enumerate(jet_names):
-            legend_helper_network.append(Line2D([], [],
-                                                linewidth=0,
-                                                markersize=4,
-                                                marker=self.markers[i],
-                                                color='black',
-                                                label='{} jets'.format(jet)))
+                    ax = axs[row][column]
 
-        for i in range(4):
-            legend_helper_type.append(Line2D([], [],
-                                             linewidth=2,
-                                             color=self.colors[i],
-                                             label=self.legend[i]))
+                    if row == 2:
+                        ax.set_xlabel(xlabel,
+                                      horizontalalignment='right',
+                                      x=1.0)
+                    if column == 0:
+                        ax.set_ylabel(ylabel,
+                                      horizontalalignment='right',
+                                      y=1.0)
 
-        for i, l, n in [(2, r'$\mu|\eta-\eta^{GEN}|$', 'eta'),
-                        (3, r'$\mu|\phi-\phi^{GEN}|$ [rad]', 'phi'),
-                        (4, r'$\mu\frac{|p_T-p_T^{GEN}|}{p_T^{GEN}}$', 'pt')]:
-
-            fig, ax = plt.subplots()
-            plt.xlabel('$p_T^{GEN}$ [GeV/s]',
-                       horizontalalignment='right',
-                       x=1.0)
-            plt.ylabel(l, horizontalalignment='right', y=1.0)
-            for x, _ in enumerate(jet_names):
-
-                for index, results in enumerate([results_base,
-                                                 results_fpn,
-                                                 results_twn,
-                                                 results_int8]):
-                    color = self.colors[index]
                     cls = results[results[:, 0] == x+1].numpy()
-                    bmin, v = 0, []
+                    bmin, v, e = 0, [], []
                     for bmax in binning:
                         b = cls[(cls[:, 1] > bmin) & (cls[:, 1] <= bmax)]
-                        absb = np.abs(b[:, i])
+                        if row == 2:
+                            absb = np.abs(b[:, idx])
+                        else:
+                            absb = b[:, idx]
                         if len(absb):
                             v.append(np.mean(absb))
+                            e.append(np.std(absb))
                         else:
                             v.append(np.nan)
+                            e.append(np.nan)
                         bmin = bmax
 
-                    ax.plot(binning, v,
-                            color=color,
-                            marker=self.markers[x],
-                            linewidth=0,
-                            markersize=5)
-            ax.set_xlim([min_pt, max_pt*1.2])
+                    ax.errorbar(binning,
+                                v,
+                                yerr=e,
+                                ecolor=self.colors[0],
+                                color=self.colors[0],
+                                marker=self.markers[0],
+                                capsize=2,
+                                elinewidth=0.5,
+                                linewidth=0)
 
-            # Change to log scale
-            ax.set_yscale("log")
-            ax.set_xscale("log")
+                    if row == 2:
+                        ax.set_ylim([0, s])
+                        ax.set_yscale("symlog")
+                    else:
+                        ax.set_ylim([-s, s])
 
-            # Add legends
-            plt.gca().add_artist(plt.legend(handles=legend_helper_type,
-                                            loc='upper left',
-                                            bbox_to_anchor=(0, -0.1)))
-            plt.gca().add_artist(plt.legend(handles=legend_helper_network,
-                                            loc='upper left',
-                                            bbox_to_anchor=(0.2, -0.1)))
-
-            plt.savefig('%s/delta-%s' % (self.save_dir, n))
+                    ax.set_xlim([min_pt, max_pt*1.2])
+                    ax.set_xscale("log")
+                    plt.setp(ax.get_yticklabels(), visible=column == 0)
+                    plt.setp(ax.get_xticklabels(), visible=row == 2)
+            plt.savefig('%s/Delta-%s' % (self.save_dir, jet_name))
             plt.close(fig)
 
-    def draw_barchart(self, x, y, label, ylabel,
+    def draw_barchart(self, x, y1, y2, label, ylabel,
                       xlabel='Batch size [events]',
                       save_name='inference'):
         """Plots errobars as a function of batch size"""
-        fig, ax = plt.subplots()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7, 2.625))
 
         width = 0.11
         groups = np.arange(len(x))
 
-        ax.set_xlabel(xlabel, horizontalalignment='right', x=1.0)
-        ax.set_ylabel(ylabel, horizontalalignment='right', y=1.0)
-        ax.bar(groups - 0.36, y[0], label=label[0], width=width)
-        ax.bar(groups - 0.24, y[1], label=label[1], width=width)
-        ax.bar(groups - 0.12, y[2], label=label[2], width=width)
-        ax.bar(groups, y[3], label=label[3], width=width)
-        ax.bar(groups + 0.12, y[4], label=label[4], width=width)
-        ax.bar(groups + 0.24, y[5], label=label[5], width=width)
-        ax.bar(groups + 0.36, y[6], label=label[6], width=width)
-        ax.set_xticks(groups)
-        ax.set_xticklabels(x)
-        ax.set_yscale('log')
-        ax.legend(bbox_to_anchor=(0, 1), loc='lower left', ncol=2)
-        fig.tight_layout()
+        ax1.set_xlabel(xlabel, horizontalalignment='right', x=1.0)
+        ax1.set_ylabel(ylabel[0], horizontalalignment='right', y=1.0)
+        ax1.bar(groups - 0.36, y1[0], label=label[0], width=width)
+        ax1.bar(groups - 0.24, y1[1], label=label[1], width=width)
+        ax1.bar(groups - 0.12, y1[2], label=label[2], width=width)
+        ax1.bar(groups + 0.00, y1[3], label=label[3], width=width)
+        ax1.bar(groups + 0.12, y1[4], label=label[4], width=width)
+        ax1.bar(groups + 0.24, y1[5], label=label[5], width=width)
+        ax1.bar(groups + 0.36, y1[6], label=label[6], width=width)
+        ax1.set_xticks(groups)
+        ax1.set_xticklabels(x)
+        ax1.set_yscale('log')
+
+        ax2.set_xlabel(xlabel, horizontalalignment='right', x=1.0)
+        ax2.set_ylabel(ylabel[1], horizontalalignment='right', y=1.0)
+        ax2.bar(groups - 0.36, y2[0], label=label[0], width=width)
+        ax2.bar(groups - 0.24, y2[1], label=label[1], width=width)
+        ax2.bar(groups - 0.12, y2[2], label=label[2], width=width)
+        ax2.bar(groups + 0.00, y2[3], label=label[3], width=width)
+        ax2.bar(groups + 0.12, y2[4], label=label[4], width=width)
+        ax2.bar(groups + 0.24, y2[5], label=label[5], width=width)
+        ax2.bar(groups + 0.36, y2[6], label=label[6], width=width)
+        ax2.set_xticks(groups)
+        ax2.set_xticklabels(x)
+        ax2.set_yscale('log')
+
+        handles, labels = ax1.get_legend_handles_labels()
+        fig.legend(handles,
+                   labels,
+                   bbox_to_anchor=(0.1, 1.02),
+                   loc='upper left',
+                   ncol=4,
+                   fontsize=7)
         fig.savefig('{}/{}'.format(self.save_dir, save_name))
         plt.close(fig)
 

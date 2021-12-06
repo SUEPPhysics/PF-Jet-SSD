@@ -17,11 +17,13 @@ class SSD(nn.Module):
                  head,
                  ssd_settings,
                  net_channels,
+                 ceva=False,
                  inference=False,
                  int8=False,
                  onnx=False):
         super(SSD, self).__init__()
 
+        self.ceva = ceva
         self.inference = inference
         self.int8 = int8
         self.onnx = onnx
@@ -30,8 +32,6 @@ class SSD(nn.Module):
         self.loc = nn.ModuleList(head[0])
         self.cnf = nn.ModuleList(head[1])
         self.reg = nn.ModuleList(head[2])
-        self.attention1 = AttentionLayer(torch.device(rank))
-        self.l2norm_1 = L2Norm(net_channels[-3], 20, torch.device(rank))
         self.n_classes = ssd_settings['n_classes']
         self.top_k = ssd_settings['top_k']
         self.min_confidence = ssd_settings['confidence_threshold']
@@ -40,6 +40,9 @@ class SSD(nn.Module):
         if self.int8:
             self.quant = QuantStub()
             self.dequant = DeQuantStub()
+        else:
+            self.attention1 = AttentionLayer(torch.device(rank))
+            self.l2norm_1 = L2Norm(net_channels[-3], 20, torch.device(rank))
 
         if self.inference:
             self.priors = Variable(PriorBox().apply(
@@ -49,7 +52,7 @@ class SSD(nn.Module):
                  'size': ssd_settings['object_size']}, rank))
             self.softmax = nn.Softmax(dim=-1)
             self.detect = Detect()
-        else:
+        elif not self.int8:
             self.l2norm_2 = L2Norm(net_channels[-1], 20, torch.device(rank))
             self.attention2 = AttentionLayer(torch.device(rank))
 
@@ -70,17 +73,19 @@ class SSD(nn.Module):
         for i, layer in enumerate(self.mobilenet):
             x = layer(x)
             if i == 11:
-                if self.int8:
+                if self.int8 or self.ceva:
                     sources.append(x)
                 else:
-                    sources.append(self.l2norm_1(x))
-                    sources[0] = self.attention1(sources[0])
+                    out = self.l2norm_1(x)
+                    out = self.attention1(out)
+                    sources.append(out)
             if i == 14:
                 if self.int8:
                     sources.append(x)
                 else:
-                    sources.append(self.l2norm_2(x))
-                    sources[1] = self.attention2(sources[1])
+                    out = self.l2norm_2(x)
+                    out = self.attention2(out)
+                    sources.append(out)
 
         # Apply multibox head to source layers
         for (x, l, c, r) in zip(sources, self.loc, self.cnf, self.reg):
@@ -95,7 +100,9 @@ class SSD(nn.Module):
         reg = torch.cat([o.view(o.size(0), -1) for o in reg], 1)
 
         # Apply correct output layer
-        if self.inference and not self.onnx:
+        if self.ceva:
+            output = (l, c, r)
+        elif self.inference and not self.onnx:
             priors = self.priors.type(type(x.data))
             priors = priors.to(torch.device(self.rank))
             output = self.detect.apply(
@@ -196,6 +203,7 @@ def multibox(n_classes, net_channels, inference):
 def build_ssd(rank,
               ssd_settings,
               net_channels,
+              ceva=False,
               inference=False,
               int8=False,
               onnx=False):
@@ -210,6 +218,7 @@ def build_ssd(rank,
                head,
                ssd_settings,
                net_channels,
+               ceva,
                inference,
                int8,
                onnx)

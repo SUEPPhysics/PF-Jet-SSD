@@ -84,7 +84,7 @@ def execute(model,
                         # Angular resolution and regression data
                         deta = np.radians(1)*im_size[0]*delta_eta
                         dphi = np.radians(1)*im_size[1]*delta_phi
-                        dpt = 1 - d[5] / (tp + epsilon)
+                        dpt = d[5] / (tp + epsilon)
                         dts = torch.Tensor([t[4], tp, deta, dphi, dpt])
                         deltas = torch.cat((deltas, dts.unsqueeze(0)))
 
@@ -157,7 +157,7 @@ def execute_baseline(dataset,
                         # Angular resolution and regression data
                         deta = np.radians(1)*im_size[0]*delta_eta
                         dphi = np.radians(1)*im_size[1]*delta_phi
-                        dpt = 1 - b[5] / (tp + epsilon)
+                        dpt = b[5] / (tp + epsilon)
                         dts = torch.Tensor([t[4], tp, deta, dphi, dpt])
                         deltas = torch.cat((deltas, dts.unsqueeze(0)))
 
@@ -306,11 +306,17 @@ if __name__ == '__main__':
 
     plot = Plotting(save_dir=config['output']['plots'])
 
-    plot.draw_precision_recall(base_results,
-                               plotting_results[0],
-                               plotting_results[1],
-                               plotting_results[2],
-                               jet_names)
+    ap, pr3, pr5 = plot.draw_precision_recall(base_results,
+                                              plotting_results[0],
+                                              plotting_results[1],
+                                              plotting_results[2],
+                                              jet_names)
+    models = ['Baseline', 'FPN', 'TWN', 'INT8']
+    for jap, jpr3, jpr5, name in zip(ap, pr3, pr5, models):
+        for x, jet in enumerate(jet_names):
+            print('Results for {0}, {1} jets.'.format(name, jet))
+            print('AP:{0:.3f}; P@R=.3:{1:.3f}; P@R=.5:{2:.3f}.'.format(
+                  jap[x], jpr3[x], jpr5[x]))
 
     plot.draw_precision_details(base_deltas,
                                 plotting_results[0],
