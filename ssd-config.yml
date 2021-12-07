@@ -59,7 +59,7 @@ ssd_settings:
   - 1
   - 280
   - 360
- n_classes: 3
+ n_classes: 2
  nms: .25
  object_size: 46.
  max_distance: .1
