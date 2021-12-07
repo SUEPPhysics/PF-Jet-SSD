@@ -12,6 +12,7 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
                  jet_size,
                  cpu=False,
                  flip_prob=None,
+                 is_classifier=False,
                  raw=False,
                  return_baseline=False,
                  return_pt=False):
@@ -24,6 +25,7 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         self.height = input_dimensions[2]  # Height of input
         self.size = jet_size / 2
         self.flip_prob = flip_prob
+        self.is_classifier = is_classifier
         self.cpu = cpu
         self.raw = raw
         self.return_baseline = return_baseline
@@ -46,17 +48,15 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
                                                   val_PFCand_PT)
         # Set labels
         labels = tcuda.FloatTensor(self.labels[index], device=self.rank)
-        labels = self.process_labels(labels, scaler)
+        labels = self.process_labels(labels, scaler, self.is_classifier)
 
         if self.flip_prob:
             if torch.rand(1) < self.flip_prob:
                 calorimeter, labels = self.flip_image(calorimeter,
-                                                      labels,
-                                                      vertical=True)
+                    labels, flip_labels=self.is_classifier, vertical=True)
             if torch.rand(1) < self.flip_prob:
                 calorimeter, labels = self.flip_image(calorimeter,
-                                                      labels,
-                                                      vertical=False)
+                    labels, flip_labels=self.is_classifier, vertical=False)
 
         if self.cpu:
             calorimeter = calorimeter.cpu()
@@ -77,15 +77,17 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
 
         return self.dataset_size
 
-    def flip_image(self, image, labels, vertical=True):
+    def flip_image(self, image, labels, flip_labels=True, vertical=True):
         if vertical:
             axis = 1
-            labels[:, [0, 2]] = 1 - labels[:, [0, 2]]
-            labels = labels[:, [2, 1, 0, 3, 4, 5]]
+            if not flip_labels:
+                labels[:, [0, 2]] = 1 - labels[:, [0, 2]]
+                labels = labels[:, [2, 1, 0, 3, 4, 5]]
         else:
             axis = 2
-            labels[:, [1, 3]] = 1 - labels[:, [1, 3]]
-            labels = labels[:, [0, 3, 2, 1, 4, 5]]
+            if not flip_labels:
+                labels[:, [1, 3]] = 1 - labels[:, [1, 3]]
+                labels = labels[:, [0, 3, 2, 1, 4, 5]]
         image = torch.flip(image, [axis])
         return image, labels
 
@@ -144,14 +146,17 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         base = torch.cat((base, base_reshaped[:, 3].unsqueeze(1)), 1)
 
         return base
-    
-    def process_labels(self, labels_raw, scaler):
-                
+
+    def process_labels(self, labels_raw, scaler, is_classifier):
         labels_reshaped = labels_raw.reshape(-1, 5)
-        
-        ### FIXME: ignored the mass, for now
-        labels_reshaped = labels_reshaped[:,:4]
-        
+
+        if is_classifier:
+            return tcuda.LongTensor([1 in labels_reshaped[:, 0] + 0.],
+                                    device=self.rank)
+
+        # FIXME: ignored the mass, for now
+        labels_reshaped = labels_reshaped[:, :4]
+
         labels = torch.empty_like(labels_reshaped)
 
         # Set fractional coordinates
