@@ -56,8 +56,8 @@ ssd_settings:
   - phi: 24
     eta: 23
  input_dimensions:
-  - 3
-  - 340
+  - 1
+  - 280
   - 360
  n_classes: 3
  nms: .25
