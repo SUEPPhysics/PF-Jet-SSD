@@ -35,13 +35,13 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
 
         if not hasattr(self, 'hdf5_dataset'):
             self.open_hdf5()
-
         idx_PFCand_Eta = tcuda.LongTensor([self.PFCand_Eta[index]],
-                                           device=self.rank)
+                                          device=self.rank)
+ 
         idx_PFCand_Phi = tcuda.LongTensor([self.PFCand_Phi[index]],
-                                           device=self.rank)
+                                          device=self.rank)
         val_PFCand_PT = tcuda.FloatTensor(self.PFCand_PT[index],
-                                           device=self.rank)
+                                          device=self.rank)
 
         calorimeter, scaler = self.process_images(idx_PFCand_Eta,
                                                   idx_PFCand_Phi,
@@ -97,7 +97,6 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         return tensor.sub(m).div(s)
 
     def open_hdf5(self):
-        print(self.source)
         self.hdf5_dataset = h5py.File(self.source, 'r')
 
         self.PFCand_Eta = self.hdf5_dataset['PFCand_Eta']
@@ -105,14 +104,13 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         self.PFCand_PT = self.hdf5_dataset['PFCand_PT']
 
         self.labels = self.hdf5_dataset['labels']
-        
-        ### FIXME: ignored this for now
+        # FIXME: ignored this for now
         # self.base = self.hdf5_dataset['baseline']
 
         self.dataset_size = len(self.labels)
 
     def process_images(self, idx_Eta, idx_Phi, idx_Pt):
-                
+
         v0 = 0*torch.ones(idx_Eta.size(1),
                           dtype=torch.long).cuda(self.rank)
         idx_channels = v0.unsqueeze(0)
@@ -120,7 +118,6 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         v = idx_Pt
 
         scaler = torch.max(v)
-                
         pixels = torch.sparse.FloatTensor(i, v, torch.Size([self.channels,
                                                             self.width,
                                                             self.height]))
