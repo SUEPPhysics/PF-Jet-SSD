@@ -2,8 +2,6 @@ import h5py
 import torch
 import torch.cuda as tcuda
 
-from ssd import qutils
-
 
 class CalorimeterJetDataset(torch.utils.data.Dataset):
 
