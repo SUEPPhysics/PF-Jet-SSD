@@ -166,8 +166,8 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         labels[:, 3] = (labels_reshaped[:, 2] + self.size) / float(self.height)
 
         # Set class label
-        labels = torch.cat((labels, labels_reshaped[:, 0].unsqueeze(1) + 1), 1)
-
+        labels = torch.cat((labels, labels_reshaped[:, 0].unsqueeze(1)), 1)
+        
         if self.return_pt:
             pts = labels_reshaped[:, 3].unsqueeze(1)
             if not self.raw:

@@ -109,7 +109,8 @@ class MultiBoxLoss(nn.Module):
         cnf_idx = (pos_idx+neg_idx).gt(0)
         trt_idx = (pos+neg).gt(0)
         cnf_prediction = cnf_data[cnf_idx].view(-1, self.n_classes)
-        one_hot = F.one_hot(cnf_truth[trt_idx], 4)
+        one_hot = F.one_hot(cnf_truth[trt_idx], self.n_classes)
+        
         smooth_target = one_hot*(1-self.alpha) + self.alpha/4
         loss_c = F.binary_cross_entropy_with_logits(cnf_prediction,
                                                     smooth_target,
