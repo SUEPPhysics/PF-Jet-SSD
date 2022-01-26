@@ -1,15 +1,15 @@
 ---
 dataset:
  train:
-  - /path/to/train0
-  - /path/to/train1
-  - /path/to/train2
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_0.h5
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_1.h5
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_2.h5
  validation:
-  - /path/to/validation0
-  - /path/to/validation1
-  - /path/to/validation2
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_3.h5
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_4.h5
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_5.h
  test:
-  - /path/to/test
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_6.h5
  size:
   - 30000
   - 30000
@@ -40,9 +40,8 @@ training_pref:
 evaluation_pref:
  batch_size: 100
  names_classes:
-  - 't'
-  - 'V'
-  - 'H'
+  - 'QCD'
+  - 'SUEP'
  workers: 0
 
 inference_pref:
@@ -52,14 +51,14 @@ ssd_settings:
  confidence_threshold: .01
  feature_maps:
   - phi: 46
-    eta: 44
+    eta: 36
   - phi: 24
-    eta: 23
+    eta: 19
  input_dimensions:
-  - 3
-  - 340
+  - 1
+  - 280
   - 360
- n_classes: 3
+ n_classes: 2
  nms: .25
  object_size: 46.
  max_distance: .1

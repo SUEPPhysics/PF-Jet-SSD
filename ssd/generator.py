@@ -49,6 +49,9 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         # Set labels
         labels = tcuda.FloatTensor(self.labels[index], device=self.rank)
         labels = self.process_labels(labels, scaler)
+        
+        # suhffle labels
+        labels = labels[torch.randperm(labels.size()[0])]
 
         if self.flip_prob:
             if torch.rand(1) < self.flip_prob:
@@ -158,12 +161,16 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         labels_reshaped = labels_reshaped[:,:4]
         
         labels = torch.empty_like(labels_reshaped)
-
+        
         # Set fractional coordinates
         labels[:, 0] = (labels_reshaped[:, 1] - self.size) / float(self.width)
         labels[:, 1] = (labels_reshaped[:, 2] - self.size) / float(self.height)
         labels[:, 2] = (labels_reshaped[:, 1] + self.size) / float(self.width)
         labels[:, 3] = (labels_reshaped[:, 2] + self.size) / float(self.height)
+        
+        # cylindrical phi
+        labels[:,1][labels[:,1] < 0] =  1 + labels[:,1][labels[:,1] < 0]
+        labels[:,3][labels[:,3] > 1] =  labels[:,3][labels[:,3] > 1] - 1
 
         # Set class label
         labels = torch.cat((labels, labels_reshaped[:, 0].unsqueeze(1)), 1)
