@@ -100,7 +100,7 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         return tensor.sub(m).div(s)
 
     def open_hdf5(self):
-        print(self.source)
+
         self.hdf5_dataset = h5py.File(self.source, 'r')
 
         self.PFCand_Eta = self.hdf5_dataset['PFCand_Eta']

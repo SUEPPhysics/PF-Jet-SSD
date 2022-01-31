@@ -128,9 +128,16 @@ def execute(rank,
     verobse = verbose and rank == 0
     train_loss, val_loss = torch.empty(3, 0), torch.empty(3, 0)
 
-    loc = AverageMeter('Localization', ':1.5f')
-    cls = AverageMeter('Classification', ':1.5f')
-    reg = AverageMeter('Regression', ':1.5f')
+    loc = AverageMeter('Loc.', ':1.5f')
+    cls = AverageMeter('Class.', ':1.5f')
+    reg = AverageMeter('Reg.', ':1.5f')
+    
+    boxAccSUEP = AverageMeter('Acc. SUEP', ':1.5f')
+    boxAccQCD = AverageMeter('Acc. QCD', ':1.5f')
+    boxRecSUEP = AverageMeter('Rec. SUEP', ':1.5f')
+    boxRecQCD = AverageMeter('Rec. QCD', ':1.5f')
+    eventAcc = AverageMeter('Acc. SUEP', ':1.5f')
+    eventRec = AverageMeter('Rec. SUEP', ':1.5f')
 
     for epoch in range(1, training_pref['max_epochs']+1):
 
@@ -147,6 +154,12 @@ def execute(rank,
         loc.reset()
         cls.reset()
         reg.reset()
+        boxAccSUEP.reset()
+        boxAccQCD.reset()
+        boxRecSUEP.reset()
+        boxRecQCD.reset()
+        eventAcc.reset()
+        eventRec.reset()
         net.train()
 
         # Ternarize weights
@@ -180,13 +193,20 @@ def execute(rank,
             else:
                 with autocast():
                     outputs = net(images)
-                    l, c, r = criterion(outputs, targets)
+                    
+                    l, c, r, boxMetrics, eventMetrics = criterion(outputs, targets)
                     loss = l + c + r + rflop
 
             loc.update(l)
             cls.update(c)
             reg.update(r)
-
+            boxAccSUEP.update(boxMetrics[0][1])
+            boxAccQCD.update(boxMetrics[0][2])
+            boxRecSUEP.update(boxMetrics[1][1])
+            boxRecQCD.update(boxMetrics[1][2])
+            eventAcc.update(eventMetrics[0])
+            eventRec.update(eventMetrics[1])
+                
             scaler.scale(loss).backward()
 
             if ternary:
@@ -203,7 +223,8 @@ def execute(rank,
                     if is_first_or_last(m):
                         m.weight.org.copy_(m.weight.data.clamp_(-1, 1))
 
-            info = 'Epoch {}, {}, {}, {}'.format(epoch, loc, cls, reg)
+            info = 'Epoch {}, {}, {}, {}, {}, {}'.format(epoch, loc, cls, reg, 
+                                                                 eventAcc, eventRec)
             if verbose:
                 tr.set_description(info)
                 tr.update(1)
@@ -222,6 +243,12 @@ def execute(rank,
         loc.reset()
         cls.reset()
         reg.reset()
+        boxAccSUEP.reset()
+        boxAccQCD.reset()
+        boxRecSUEP.reset()
+        boxRecQCD.reset()
+        eventAcc.reset()
+        eventRec.reset()
         net.eval()
 
         with torch.no_grad():
@@ -235,14 +262,16 @@ def execute(rank,
 
             for batch_index, (images, targets) in enumerate(val_loader):
                 outputs = net(images)
-                l, c, r = criterion(outputs, targets)
+                l, c, r, boxMetrics, eventMetrics = criterion(outputs, targets)
                 l, c, r = reduce_tensor(l.data, c.data, r.data)
 
                 loc.update(l)
                 cls.update(c)
                 reg.update(r)
+                eventAcc.update(eventMetrics[0])
+                eventRec.update(eventMetrics[1])
 
-                info = 'Validation, {}, {}, {}'.format(loc, cls, reg)
+                info = 'Validation, {}, {}, {}, {}, {}'.format(loc, cls, reg, eventAcc, eventRec)
                 if verbose:
                     tr.set_description(info)
                     tr.update(1)
@@ -332,6 +361,7 @@ if __name__ == '__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
     world_size = torch.cuda.device_count()
+    print("World size:", world_size)
 
     mp.spawn(execute,
              args=(world_size,
