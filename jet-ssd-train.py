@@ -128,16 +128,17 @@ def execute(rank,
     verobse = verbose and rank == 0
     train_loss, val_loss = torch.empty(3, 0), torch.empty(3, 0)
     train_metrics, val_metrics = torch.empty(2, 0), torch.empty(2, 0)
+    train_boxmetrics, val_boxmetrics = torch.empty(4, 0), torch.empty(4, 0)
 
     loc = AverageMeter('Loc.', ':1.5f')
     cls = AverageMeter('Class.', ':1.5f')
     reg = AverageMeter('Reg.', ':1.5f')
     
-    boxAccSUEP = AverageMeter('Acc. SUEP', ':1.5f')
-    boxAccQCD = AverageMeter('Acc. QCD', ':1.5f')
+    boxPreSUEP = AverageMeter('Pre. SUEP', ':1.5f')
+    boxPreQCD = AverageMeter('Pre. QCD', ':1.5f')
     boxRecSUEP = AverageMeter('Rec. SUEP', ':1.5f')
     boxRecQCD = AverageMeter('Rec. QCD', ':1.5f')
-    eventAcc = AverageMeter('Acc. SUEP', ':1.5f')
+    eventPre = AverageMeter('Pre. SUEP', ':1.5f')
     eventRec = AverageMeter('Rec. SUEP', ':1.5f')
 
     for epoch in range(1, training_pref['max_epochs']+1):
@@ -155,11 +156,11 @@ def execute(rank,
         loc.reset()
         cls.reset()
         reg.reset()
-        boxAccSUEP.reset()
-        boxAccQCD.reset()
+        boxPreSUEP.reset()
+        boxPreQCD.reset()
         boxRecSUEP.reset()
         boxRecQCD.reset()
-        eventAcc.reset()
+        eventPre.reset()
         eventRec.reset()
         net.train()
 
@@ -201,11 +202,11 @@ def execute(rank,
             loc.update(l)
             cls.update(c)
             reg.update(r)
-            boxAccSUEP.update(boxMetrics[0][1])
-            boxAccQCD.update(boxMetrics[0][2])
+            boxPreSUEP.update(boxMetrics[0][1])
+            boxPreQCD.update(boxMetrics[0][2])
             boxRecSUEP.update(boxMetrics[1][1])
             boxRecQCD.update(boxMetrics[1][2])
-            eventAcc.update(eventMetrics[0])
+            eventPre.update(eventMetrics[0])
             eventRec.update(eventMetrics[1])
                 
             scaler.scale(loss).backward()
@@ -225,7 +226,7 @@ def execute(rank,
                         m.weight.org.copy_(m.weight.data.clamp_(-1, 1))
 
             info = 'Epoch {}, {}, {}, {}, {}, {}'.format(epoch, loc, cls, reg, 
-                                                                 eventAcc, eventRec)
+                                                                 eventPre, eventRec)
             if verbose:
                 tr.set_description(info)
                 tr.update(1)
@@ -233,9 +234,11 @@ def execute(rank,
         if rank == 0:
             logger.debug(info)
         tloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
-        tmetrics = torch.tensor([eventAcc.avg, eventRec.avg]).unsqueeze(1)
+        tmetrics = torch.tensor([eventPre.avg, eventRec.avg]).unsqueeze(1)
+        tboxmetrics = torch.tensor([boxPreSUEP.avg, boxPreQCD.avg, boxRecSUEP.avg, boxRecQCD.avg]).unsqueeze(1)
         train_loss = torch.cat((train_loss, tloss), 1)
         train_metrics = torch.cat((train_metrics, tmetrics),1)
+        train_boxmetrics = torch.cat((train_boxmetrics, tboxmetrics),1)
         if verbose:
             tr.close()
 
@@ -246,11 +249,11 @@ def execute(rank,
         loc.reset()
         cls.reset()
         reg.reset()
-        boxAccSUEP.reset()
-        boxAccQCD.reset()
+        boxPreSUEP.reset()
+        boxPreQCD.reset()
         boxRecSUEP.reset()
         boxRecQCD.reset()
-        eventAcc.reset()
+        eventPre.reset()
         eventRec.reset()
         net.eval()
 
@@ -271,10 +274,14 @@ def execute(rank,
                 loc.update(l)
                 cls.update(c)
                 reg.update(r)
-                eventAcc.update(eventMetricsVal[0])
+                boxPreSUEP.update(boxMetrics[0][1])
+                boxPreQCD.update(boxMetrics[0][2])
+                boxRecSUEP.update(boxMetrics[1][1])
+                boxRecQCD.update(boxMetrics[1][2])
+                eventPre.update(eventMetricsVal[0])
                 eventRec.update(eventMetricsVal[1])
 
-                info = 'Validation, {}, {}, {}, {}, {}'.format(loc, cls, reg, eventAcc, eventRec)
+                info = 'Validation, {}, {}, {}, {}, {}'.format(loc, cls, reg, eventPre, eventRec)
                 if verbose:
                     tr.set_description(info)
                     tr.update(1)
@@ -282,9 +289,11 @@ def execute(rank,
             if rank == 0:
                 logger.debug(info)
             vloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
-            vmetrics = torch.tensor([eventAcc.avg, eventRec.avg]).unsqueeze(1)
+            vmetrics = torch.tensor([eventPre.avg, eventRec.avg]).unsqueeze(1)
+            vboxmetrics = torch.tensor([boxPreSUEP.avg, boxPreQCD.avg, boxRecSUEP.avg, boxRecQCD.avg]).unsqueeze(1)
             val_loss = torch.cat((val_loss, vloss), 1)
             val_metrics = torch.cat((val_metrics, vmetrics),1)
+            val_boxmetrics = torch.cat((val_boxmetrics, vboxmetrics),1)
             if verbose:
                 tr.close()
 
@@ -294,8 +303,13 @@ def execute(rank,
             
             plot.draw_metrics(train_metrics,
                            val_metrics,
-                           ["Accuracy", "Recall"],
-                           name)
+                           ["Precision", "Recall"],
+                           "event_metrics_" + name)
+            
+            plot.draw_metrics(train_boxmetrics,
+                           val_boxmetrics,
+                           ["Precision SUEP", "Precision QCD", "Recall SUEP", "Recall QCD"],
+                           "box_metrics_" + name)
 
             if rank == 0 and cp_es(vloss.sum(0) + rflop.cpu(), ssd_net):
                 break

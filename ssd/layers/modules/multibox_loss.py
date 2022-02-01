@@ -57,12 +57,6 @@ class MultiBoxLoss(nn.Module):
             loss_r: regression loss
         """
         loc_data, cnf_data, reg_data = predictions
-        
-        # debug
-        # print(loc_data[0])
-        # print(cnf_data[0])
-        # print(reg_data[0])
-        # sys.exit()
 
         bs = loc_data.size(0)  # batch size
         n_priors = self.defaults.size(0)  # number of priors
@@ -101,13 +95,7 @@ class MultiBoxLoss(nn.Module):
         loc_prediction = loc_data[pos_idx].view(-1, 2)
         loc_truth = loc_truth[pos_idx].view(-1, 2)
         loss_l = F.smooth_l1_loss(loc_prediction, loc_truth, reduction='sum')
-        
-        # debug
-        # print("Localization")
-        # print(loc_prediction[0])
-        # print(loc_truth[0])
-        #sys.exit()
-
+  
         # Compute max conf across batch for hard negative mining
         b_conf = cnf_data.view(-1, self.n_classes)
         loss_c = log_sum_exp(b_conf) - b_conf.gather(1, cnf_truth.view(-1, 1))
@@ -140,24 +128,24 @@ class MultiBoxLoss(nn.Module):
         for i in range(self.n_classes):
             acc.append((cm[i,i] / sum(cm[:,i])) if sum(cm[:,i]) > 0 else 0)
             rec.append((cm[i,i] / sum(cm[i,:]))  if sum(cm[i,:]) > 0 else 0)
-
-        # Compute regression loss
-        pos_idx = pos.unsqueeze(pos.dim()).expand_as(reg_data)
-        reg_prediction = reg_data[pos_idx].view(-1, 1)
-        reg_truth = reg_truth[pos_idx].view(-1, 1)
-        loss_r = F.smooth_l1_loss(reg_prediction, reg_truth, reduction='sum')
-        
+            
         # per event metrics
         hasSUEP = torch.any(cnf_truth == 1, 1)
         _, preds = torch.max(cnf_data.data, 2)
         predSUEP = torch.any(preds == 1, 1)
         TP = torch.sum(hasSUEP*predSUEP).data.tolist()
-        eventAcc = TP / torch.sum(predSUEP).data.tolist() if torch.sum(predSUEP) > 0 else 0
+        eventPre = TP / torch.sum(predSUEP).data.tolist() if torch.sum(predSUEP) > 0 else 0
         eventRec = TP / torch.sum(hasSUEP).data.tolist() if torch.sum(hasSUEP) > 0 else 0
+      
+        # Compute regression loss
+        pos_idx = pos.unsqueeze(pos.dim()).expand_as(reg_data)
+        reg_prediction = reg_data[pos_idx].view(-1, 1)
+        reg_truth = reg_truth[pos_idx].view(-1, 1)
+        loss_r = F.smooth_l1_loss(reg_prediction, reg_truth, reduction='sum')
 
         # Final normalized losses
         N = num_pos.data.sum().float()
         loss_l /= N
         loss_c /= N
         loss_r /= N
-        return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, [acc, rec], [eventAcc, eventRec]
+        return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, [acc, rec], [eventPre, eventRec]
