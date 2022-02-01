@@ -127,6 +127,7 @@ def execute(rank,
     scaler = GradScaler()
     verobse = verbose and rank == 0
     train_loss, val_loss = torch.empty(3, 0), torch.empty(3, 0)
+    train_metrics, val_metrics = torch.empty(2, 0), torch.empty(2, 0)
 
     loc = AverageMeter('Loc.', ':1.5f')
     cls = AverageMeter('Class.', ':1.5f')
@@ -232,7 +233,9 @@ def execute(rank,
         if rank == 0:
             logger.debug(info)
         tloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
+        tmetrics = torch.tensor([eventAcc.avg, eventRec.avg]).unsqueeze(1)
         train_loss = torch.cat((train_loss, tloss), 1)
+        train_metrics = torch.cat((train_metrics, tmetrics),1)
         if verbose:
             tr.close()
 
@@ -262,14 +265,14 @@ def execute(rank,
 
             for batch_index, (images, targets) in enumerate(val_loader):
                 outputs = net(images)
-                l, c, r, boxMetrics, eventMetrics = criterion(outputs, targets)
+                l, c, r, boxMetricsVal, eventMetricsVal = criterion(outputs, targets)
                 l, c, r = reduce_tensor(l.data, c.data, r.data)
 
                 loc.update(l)
                 cls.update(c)
                 reg.update(r)
-                eventAcc.update(eventMetrics[0])
-                eventRec.update(eventMetrics[1])
+                eventAcc.update(eventMetricsVal[0])
+                eventRec.update(eventMetricsVal[1])
 
                 info = 'Validation, {}, {}, {}, {}, {}'.format(loc, cls, reg, eventAcc, eventRec)
                 if verbose:
@@ -279,12 +282,19 @@ def execute(rank,
             if rank == 0:
                 logger.debug(info)
             vloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
+            vmetrics = torch.tensor([eventAcc.avg, eventRec.avg]).unsqueeze(1)
             val_loss = torch.cat((val_loss, vloss), 1)
+            val_metrics = torch.cat((val_metrics, vmetrics),1)
             if verbose:
                 tr.close()
 
             plot.draw_loss(train_loss.cpu().numpy(),
                            val_loss.cpu().numpy(),
+                           name)
+            
+            plot.draw_metrics(train_metrics,
+                           val_metrics,
+                           ["Accuracy", "Recall"],
                            name)
 
             if rank == 0 and cp_es(vloss.sum(0) + rflop.cpu(), ssd_net):

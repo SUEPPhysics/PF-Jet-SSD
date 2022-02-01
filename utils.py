@@ -128,9 +128,30 @@ class Plotting():
                      linestyle=self.line_styles[1],
                      color=color)
 
-        ax.legend()
+        plt.legend(bbox_to_anchor=(1.04,1), loc="upper left")
         plt.savefig('{}/loss-{}'.format(self.save_dir, name))
         plt.close(fig)
+        
+    def draw_metrics(self, eventMetrics, eventMetricsVal, metricLabels, name):
+        fig, ax = plt.subplots()
+        ax.set_xlabel("Epoch", horizontalalignment='right', x=1.0)
+        ax.set_ylabel("Loss", horizontalalignment='right', y=1.0)
+        
+        cmap = plt.cm.plasma(np.linspace(0, 1, len(metricLabels)+1))
+        for metric, vmetric, n, c in zip(eventMetrics, eventMetricsVal, metricLabels, cmap):
+            ax.plot(metric,
+                    linestyle=self.line_styles[0],
+                    color=c,
+                    label=n)
+            ax.plot(vmetric,
+                    linestyle=self.line_styles[1],
+                    color=c)
+            
+        ax.legend(bbox_to_anchor=(1.04,1), loc="upper left")
+        fig.savefig('{}/metrics-{}'.format(self.save_dir, name))
+        plt.close(fig)
+            
+        
 
     def draw_precision_recall(self,
                               results_base,
