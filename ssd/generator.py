@@ -16,7 +16,8 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
                  flip_prob=None,
                  raw=False,
                  return_baseline=False,
-                 return_pt=False):
+                 return_pt=False,
+                 return_scaler=False):
         """Generator for calorimeter and jet data"""
 
         self.rank = rank
@@ -30,6 +31,7 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         self.raw = raw
         self.return_baseline = return_baseline
         self.return_pt = return_pt
+        self.return_scaler = return_scaler
 
     def __getitem__(self, index):
 
@@ -67,6 +69,9 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
             calorimeter = calorimeter.cpu()
             labels = labels.cpu()
             scaler = scaler.cpu()
+            
+        if self.return_scaler:
+            return calorimeter, labels, scaler
 
         if self.return_baseline:
             base = tcuda.FloatTensor(self.base[index], device=self.rank)

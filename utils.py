@@ -173,6 +173,13 @@ class Plotting():
                                      results_fpn,
                                      results_twn,
                                      results_int8]):
+            
+            if results is None: 
+                results_ap.append(None)
+                results_pr3.append(None)
+                results_pr5.append(None)
+                continue
+            
             name = self.legend[i]
             scores, truths = [], []
             tmp_ap, tmp_pr3, tmp_pr5 = [], [], []
@@ -194,21 +201,21 @@ class Plotting():
                     tmp_pr5.append(np.nan)
                 else:
                     tmp_pr5.append(precision[x])
-            results_ap.append(tmp_ap)
-            results_pr3.append(tmp_pr3)
-            results_pr5.append(tmp_pr5)
-
-            precision, recall, _ = precision_recall_curve(truths, scores)
-            ap = self.average_precision_score(recall, precision)
-            print(r'{0}, AP: {1:.3f}'.format(name, ap))
-            label = r'{0}'.format(name)
-            plt.plot(recall[1:],
+                    
+                    
+                print(r'{0}, AP: {1:.3f}'.format(name, ap))
+                label = '{0}: {1} jets, AP: {2:.3f}'.format(name, jet, ap)
+                plt.plot(recall[1:],
                      precision[1:],
                      linestyle=self.line_styles[i],
                      linewidth=.5,
                      markersize=0,
-                     color=self.colors[0],
+                     color=self.colors[j],
                      label=label)
+
+            results_ap.append(tmp_ap)
+            results_pr3.append(tmp_pr3)
+            results_pr5.append(tmp_pr5)
 
         plt.xlabel(r'Recall (TPR)', horizontalalignment='right', x=1.0)
         plt.ylabel(r'Precision (PPV)', horizontalalignment='right', y=1.0)
@@ -218,6 +225,43 @@ class Plotting():
         fig.savefig('{}/Precision-Recall-Curve'.format(self.save_dir))
         plt.close(fig)
         return results_ap, results_pr3, results_pr5
+
+#     def draw_precision_recall(self,
+#                               jet_names,
+#                               results_base=None,
+#                               results_fpn=None,
+#                               results_twn=None,
+#                               results_int8=None):
+#         """Plots the precision recall curve"""
+
+#         fig, ax = plt.subplots()
+#         for i, results in enumerate([results_base,
+#                                      results_fpn,
+#                                      results_twn,
+#                                      results_int8]):
+            
+#             if results is None: continue
+                        
+#             name = self.legend[i]
+#             for j, jet in enumerate(jet_names):
+#                 score = results[j][:, 3].numpy()
+#                 truth = results[j][:, 4].numpy()
+#                 precision, recall, _ = precision_recall_curve(truth, score)
+#                 ap = self.average_precision_score(truth, score)
+#                 label = '{0}: {1} jets, AP: {2:.3f}'.format(name, jet, ap)
+#                 plt.plot(recall[1:],
+#                          precision[1:],
+#                          linestyle=self.line_styles[j],
+#                          color=self.colors[i],
+#                          label=label)
+
+#         plt.xlabel('Recall (TPR)', horizontalalignment='right', x=1.0)
+#         plt.ylabel('Precision (PPV)', horizontalalignment='right', y=1.0)
+#         plt.xticks([0.2, 0.4, 0.6, 0.8, 1])
+#         plt.yticks([0.2, 0.4, 0.6, 0.8, 1])
+#         ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
+#         fig.savefig('{}/precision-recall-curve'.format(self.save_dir))
+#         plt.close(fig)
 
     def draw_precision_details(self, gt, fpn, twn, int8, jet_names, nbins=11):
         """Plots the precision histogram at fixed recall"""
@@ -231,6 +275,7 @@ class Plotting():
         for x, jet_name in enumerate(jet_names):
             fig, axs = plt.subplots(3, 3, figsize=(10.5, 5.4))
             for row, result in enumerate([fpn, twn, int8]):
+                if result is None: continue
                 for column, (i, l, ax_mul, ax_sub) in enumerate(
                         zip(idxs, xlabels, ax_m, ax_s)):
 
@@ -244,7 +289,7 @@ class Plotting():
                                       y=1.0)
 
                     # Fix binning across classes
-                    if i == 5:
+                    if i == 5 and gt is not None:
                         pt = gt[gt[:, 0] == x+1][:, 1].numpy()
                         min_pt, max_pt = np.min(pt), np.max(pt)
                         binning = np.logspace(np.log10(min_pt),
@@ -311,18 +356,26 @@ class Plotting():
                    r'$|\frac{p_T}{p_T^{GEN}}|$']
         scales = [0.4, 0.5, 20]
         idxs = [2, 3, 4]
-
+        
         for x, jet_name in enumerate(jet_names):
             fig, axs = plt.subplots(3, 4, figsize=(14, 5.4))
             for row, (idx, ylabel, s) in enumerate(zip(idxs, ylabels, scales)):
                 # Fix binning across classes
-                pt = base[base[:, 0] == x+1][:, 1].numpy()
-                min_pt, max_pt = np.min(pt), np.max(pt)
-                binning = np.logspace(np.log10(min_pt),
-                                      np.log10(max_pt),
-                                      nbins)[1:]
+                if base is not None:
+                    pt = base[base[:, 0] == x+1][:, 1].numpy()
+                    min_pt, max_pt = np.min(pt), np.max(pt)
+                    binning = np.logspace(np.log10(min_pt),
+                                          np.log10(max_pt),
+                                          nbins)[1:]
+                else:
+                    pt = fpn[fpn[:, 0] == x+1][:, 1].numpy()
+                    min_pt, max_pt = np.min(pt), np.max(pt)
+                    binning = np.logspace(np.log10(min_pt),
+                                          np.log10(max_pt),
+                                          nbins)[1:]
                 for column, results in enumerate([base, fpn, twn, int8]):
-
+                    
+                    if results is None: continue
                     ax = axs[row][column]
 
                     if row == 2:
@@ -491,6 +544,9 @@ def collate_fn(batch):
     tgt = list(transposed_data[1])
     if len(transposed_data) < 3:
         return inp, tgt
+    if len(transposed_data) < 4:
+        slr = list(transposed_data[2])
+        return inp, tgt, slr
     bsl = list(transposed_data[2])
     slr = list(transposed_data[3])
     return inp, tgt, bsl, slr
@@ -507,7 +563,8 @@ def get_data_loader(hdf5_source_path,
                     raw=False,
                     return_baseline=False,
                     return_pt=False,
-                    shuffle=True):
+                    shuffle=True,
+                    return_scaler=False):
     dataset = CalorimeterJetDataset(torch.device(rank),
                                     hdf5_source_path,
                                     input_dimensions,
@@ -516,7 +573,8 @@ def get_data_loader(hdf5_source_path,
                                     flip_prob=flip_prob,
                                     raw=raw,
                                     return_baseline=return_baseline,
-                                    return_pt=return_pt)
+                                    return_pt=return_pt,
+                                    return_scaler=return_scaler)
     return DataLoader(dataset,
                       batch_size=batch_size,
                       collate_fn=collate_fn,
