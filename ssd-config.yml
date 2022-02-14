@@ -7,7 +7,7 @@ dataset:
  validation:
   - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_3.h5
   - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_4.h5
-  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_5.h
+  - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_5.h5
  test:
   - /home/lavezzo/ssd_data/h5/SUEPPhysicsSSD_6.h5
  size:
@@ -18,9 +18,6 @@ dataset:
   - 10000
   - 10000
   - 100000
-  - 100
-  - 100
-  - 100
 
 output:
  model: ./models
@@ -40,8 +37,8 @@ training_pref:
 evaluation_pref:
  batch_size: 100
  names_classes:
-  - 'QCD'
   - 'SUEP'
+  - 'QCD'
  workers: 0
 
 inference_pref:
