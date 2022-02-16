@@ -114,7 +114,6 @@ class MultiBoxLoss(nn.Module):
         trt_idx = (pos+neg).gt(0)
         cnf_prediction = cnf_data[cnf_idx].view(-1, self.n_classes)
         one_hot = F.one_hot(cnf_truth[trt_idx], self.n_classes)
-        
         smooth_target = one_hot*(1-self.alpha) + self.alpha/self.n_classes
         loss_c = F.binary_cross_entropy_with_logits(cnf_prediction,
                                                     smooth_target,
@@ -130,13 +129,15 @@ class MultiBoxLoss(nn.Module):
             rec.append((cm[i,i] / sum(cm[i,:]))  if sum(cm[i,:]) > 0 else 0)
             
         # per event metrics
+        THRESHOLD = 0.3
         hasSUEP = torch.any(cnf_truth == 1, 1)
-        _, preds = torch.max(cnf_data.data, 2)
-        predSUEP = torch.any(preds == 1, 1)
-        TP = torch.sum(hasSUEP*predSUEP).data.tolist()
-        eventPre = TP / torch.sum(predSUEP).data.tolist() if torch.sum(predSUEP) > 0 else 0
+        softmax = torch.nn.Softmax(2)
+        probs = softmax(cnf_data)
+        predSUEP_thresh = torch.any(probs[:,:,1] > THRESHOLD, 1)        # replaced max for now      
+        TP = torch.sum(hasSUEP*predSUEP_thresh).data.tolist()
+        eventPre = TP / torch.sum(predSUEP_thresh).data.tolist() if torch.sum(predSUEP_thresh) > 0 else 0
         eventRec = TP / torch.sum(hasSUEP).data.tolist() if torch.sum(hasSUEP) > 0 else 0
-      
+       
         # Compute regression loss
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(reg_data)
         reg_prediction = reg_data[pos_idx].view(-1, 1)
