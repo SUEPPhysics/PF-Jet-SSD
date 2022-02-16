@@ -6,6 +6,9 @@ import itertools
 import os
 import uproot
 import yaml
+import vector
+
+vector.register_awkward()
 
 from utils import IsReadableDir
 from tqdm import tqdm
@@ -14,15 +17,17 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 class PhysicsConstants():
 
-    def __init__(self):
+    def __init__(self, config=None):
 
         self.ht_threshold = 500.
 
         self.eta_span = (-2.5, 2.5)
-        self.eta_steps = 281
+        self.eta_steps = 500
         self.phi_span = (-np.pi, np.pi)
-        self.phi_steps = 361
+        self.phi_steps = 500
         self.set_edges()
+        
+        if config is not None: self.config = yaml.safe_load(open(config))
 
     def set_edges(self):
 
@@ -42,9 +47,11 @@ class HDF5Generator:
     def __init__(self,
                  hdf5_dataset_path: str,
                  hdf5_dataset_size: int,
+                 config: str,
                  verbose: bool = True):
 
-        self.constants = PhysicsConstants()
+        self.constants = PhysicsConstants(config)
+        self.jet_size = self.constants.config['ssd_settings']['object_size']
         self.edges_eta, self.edges_phi = self.constants.get_edges()
         self.hdf5_dataset_path = hdf5_dataset_path
         self.hdf5_dataset_size = hdf5_dataset_size
@@ -85,6 +92,10 @@ class HDF5Generator:
                 dtype=h5py.special_dtype(vlen=np.float32))
 
             get_suep = itertools.cycle([True, False])
+            
+            # debug
+            masses, pts = [], []
+            
             for i in range(self.hdf5_dataset_size):
 
                 if next(get_suep):
@@ -97,6 +108,8 @@ class HDF5Generator:
                 phi = event_details.get('phi')
                 mass = event_details.get('mass')
                 flag = event_details.get('flag')
+                suep_eta = event_details.get('suep_eta')
+                suep_phi = event_details.get('suep_phi')
 
                 jpt = event_details.get('jpt')
                 jeta = event_details.get('jeta')
@@ -106,18 +119,23 @@ class HDF5Generator:
                 px_eta, px_phi, values = self.get_energy_map(eta, phi, pt)
 
                 # Get SUEP labels
-                suep_label = self.get_suep_label(eta, phi, pt, mass, flag)
+                suep_label = self.get_suep_label(eta[flag], phi[flag], 
+                                                 pt[flag], mass[flag], 
+                                                 suep_eta, suep_phi)
 
                 # Get jet labels
                 labels = self.get_jet_labels(jeta,
                                              jphi,
                                              jpt,
                                              jmass,
-                                             suep_label)
+                                             suep_label,
+                                             suep_eta, suep_phi)
 
                 # Concatenate labels
-                if suep_label:
-                    labels.append(suep_label)
+                if suep_label: labels.append(suep_label)
+                    
+                # make sure that labels are randomly ordered
+                labels = np.random.permutation(labels)
 
                 # Flatten the labels array and write it to the dataset
                 hdf5_labels[i] = np.hstack(labels)
@@ -153,53 +171,53 @@ class HDF5Generator:
                        phis: np.ndarray,
                        pts: np.ndarray,
                        mass: np.ndarray,
-                       label: Optional[list]) -> list:
+                       label: Optional[list],
+                       suep_eta: int,
+                       suep_phi: int) -> list:
         """Returns labels for jets"""
         coordinates = []
         for e, p, pt, m in zip(etas, phis, pts, mass):
             x = np.argmax(self.edges_eta >= e)
             y = np.argmax(self.edges_phi >= p)
-            if label and \
-               x > label[0] and \
-               x < label[2] and \
-               y > label[1] and \
-               y < label[3]:
-                continue
+            
+            # exclude jets within dR < 08 of a SUEP
+            if label and np.sqrt((suep_eta - e)**2 + (suep_phi - p)**2) < 0.8: continue
+            
             coordinates.append([2, x, y, pt, m])
         return coordinates
+    
+    def eta_to_pixel(self, eta):
+        """ Linear transformation from eta to pixels """
+        slope = (self.constants.eta_steps/(self.constants.eta_span[1] - self.constants.eta_span[0]))
+        return slope*(eta - self.constants.eta_span[0])
+    
+    def phi_to_pixel(self, phi):
+        """ Linear transformation from phi to pixels """
+        slope = (self.constants.phi_steps/(self.constants.phi_span[1] - self.constants.phi_span[0]))
+        return slope*(phi - self.constants.phi_span[0])
 
     def get_suep_label(self,
                        etas: np.ndarray,
                        phis: np.ndarray,
                        pts: np.ndarray,
                        mass: np.ndarray,
-                       flags: np.ndarray) -> Optional[list]:
+                       suep_eta: int,
+                       suep_phi: int) -> Optional[list]:
         """Returns labels for suep"""
-        pt = sum(pts[flags])
+        
+        pt = sum(pts)
         if pt == 0:
             return None
 
-        m = sum(mass[flags])
-        e = etas[flags]
-        p = phis[flags]
-
-        p_alt = [i+np.pi if i < 0 else i-np.pi for i in p]
-
-        xmin = np.argmax(self.edges_eta >= min(e))
-        xmax = np.argmax(self.edges_eta >= max(e))
-        cx = (xmin + xmax) / 2
-
-        ymin1 = np.argmax(self.edges_phi >= min(p))
-        ymax1 = np.argmax(self.edges_phi >= max(p))
-
-        ymin2 = np.argmax(self.edges_phi >= min(p_alt))
-        ymax2 = np.argmax(self.edges_phi >= max(p_alt))
-
-        if abs(ymax2-ymin2) < abs(ymax1-ymin1):
-            if abs(ymin2-180) < abs(ymax2-180):
-                return [1, cx, (ymin2+ymax2-360)/2, pt, m]
-            return [1, cx, (ymin2+ymax2+360)/2, pt, m]
-        return [1, cx, (ymin1 + ymax1) / 2, pt, m]
+        # calculate mass
+        tracks = vector.array({
+            "eta": etas, "phi": phis, "pt": pts, "M": mass
+        })
+        SUEP = vector.obj(px=0,py=0,pz=0,E=0)
+        for track in tracks: SUEP = SUEP + track
+        m = SUEP.mass
+        
+        return [1, self.eta_to_pixel(suep_eta), self.phi_to_pixel(suep_phi), pt, m]
 
 
 class EventGenerator():
@@ -224,14 +242,27 @@ class EventGenerator():
             phis = tree['PFcand_phi'].array()
             etas = tree['PFcand_eta'].array()
             is_suep = tree['PFcand_fromsuep'].array()
+            suep_etas = tree['SUEP_Truth_eta'].array()
+            suep_phis = tree['SUEP_Truth_phi'].array()
+            
+            # track selections
+            ### FIXME: missing dz, dzErr, fromPV for full selection on tracks
+            cut = (pts > 0.7) & (abs(etas) <= 2.5)
+            pts = pts[cut]
+            mass = mass[cut]
+            phis = phis[cut]
+            etas = etas[cut]
+            
             n_jet = tree['n_fatjet'].array()
             jet_pts = tree['FatJet_pt'].array()
             jet_mass = tree['FatJet_mass'].array()
             jet_etas = tree['FatJet_eta'].array()
             jet_phis = tree['FatJet_phi'].array()
+            
 
             for i, ht in enumerate(hts):
 
+                # event selections
                 if ht < self.constants.ht_threshold or n_jet[i] < 2:
                     continue
 
@@ -240,6 +271,8 @@ class EventGenerator():
                        'phi': np.array(phis[i]),
                        'mass': np.array(mass[i]),
                        'flag': np.array(is_suep[i]),
+                       'suep_eta': np.array(suep_etas[i]),
+                       'suep_phi': np.array(suep_phis[i]),
                        'jpt': np.array(jet_pts[i]),
                        'jeta': np.array(jet_etas[i]),
                        'jphi': np.array(jet_phis[i]),
@@ -270,6 +303,7 @@ def main(path_suep: str,
         generator = HDF5Generator(
             hdf5_dataset_path='{}/SUEPPhysicsSSD_{}.h5'.format(path_target, i),
             hdf5_dataset_size=dataset_size,
+            config=config,
             verbose=verbose)
 
         generator.create_hdf5_dataset(eg_suep, eg_qcd)
