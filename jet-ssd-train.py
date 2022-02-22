@@ -11,6 +11,7 @@ import torch.multiprocessing as mp
 import tqdm
 import warnings
 import yaml
+from termcolor import cprint
 
 from torch.autograd import Variable
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -26,6 +27,7 @@ from ssd.net import build_ssd
 from ssd.qutils import get_delta, get_alpha, to_ternary
 from utils import AverageMeter, IsValidFile, Plotting, get_data_loader, \
     set_logging
+from torchsummary import summary
 
 
 warnings.filterwarnings(
@@ -47,7 +49,8 @@ def execute(rank,
             net_channels,
             trained_model_path,
             flop_regularizer,
-            verbose):
+            verbose,
+            disco_mode):
 
     setup(rank, world_size)
 
@@ -87,6 +90,9 @@ def execute(rank,
     if rank == 0:
         logger.debug('SSD architecture:\n{}'.format(str(ssd_net)))
 
+    if verbose: 
+        print(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
+    
     # Initialize weights
     if trained_model_path:
         ssd_net.load_weights(trained_model_path)
@@ -126,10 +132,11 @@ def execute(rank,
                              min_overlap=ssd_settings['overlap_threshold'])
     scaler = GradScaler()
     verobse = verbose and rank == 0
-    train_loss, val_loss = torch.empty(3, 0), torch.empty(3, 0)
+    train_loss, val_loss = torch.empty(3 + int(disco_mode), 0), torch.empty(3 + int(disco_mode), 0)
     train_metrics, val_metrics = torch.empty(2, 0), torch.empty(2, 0)
     train_boxmetrics, val_boxmetrics = torch.empty(4, 0), torch.empty(4, 0)
 
+    disco = AverageMeter('Disco', ':1.5f')
     loc = AverageMeter('Loc.', ':1.5f')
     cls = AverageMeter('Class.', ':1.5f')
     reg = AverageMeter('Reg.', ':1.5f')
@@ -153,6 +160,7 @@ def execute(rank,
             # Freeze batch norm mean and variance estimates
             net.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
 
+        disco.reset()
         loc.reset()
         cls.reset()
         reg.reset()
@@ -196,8 +204,19 @@ def execute(rank,
                 with autocast():
                     outputs = net(images)
                     
-                    l, c, r, boxMetrics, eventMetrics = criterion(outputs, targets)
-                    loss = l + c + r + rflop
+                    if disco_mode:
+                        # disco_variable = ntracks
+                        # FIXME: this assumes no tracks overlap on the same pixel,
+                        # roughly true for 500x500 images, but can and should be improved.
+                        # Furthermore, calculating is at this step is a waste of time (how much?)
+                        # might be better to include this information during data generation
+                        ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze()
+                        l, c, r, d, boxMetrics, eventMetrics = criterion(outputs, targets, torch.Tensor.float(ntracks))
+                        loss = l + c + r + d + rflop
+                        disco.update(d)
+                    else:
+                        l, c, r, boxMetrics, eventMetrics = criterion(outputs, targets)
+                        loss = l + c + r + rflop
 
             loc.update(l)
             cls.update(c)
@@ -225,15 +244,21 @@ def execute(rank,
                     if is_first_or_last(m):
                         m.weight.org.copy_(m.weight.data.clamp_(-1, 1))
 
-            info = 'Epoch {}, {}, {}, {}, {}, {}'.format(epoch, loc, cls, reg, 
-                                                                 eventPre, eventRec)
+            if disco_mode:
+                info = 'Epoch {}, {}, {}, {}, {}, {}, {}'.format(epoch, loc, cls, reg, disco,
+                                                                     eventPre, eventRec)
+            else:
+                info = 'Epoch {}, {}, {}, {}, {}, {}'.format(epoch, loc, cls, reg, 
+                                                                     eventPre, eventRec)
             if verbose:
                 tr.set_description(info)
                 tr.update(1)
 
         if rank == 0:
             logger.debug(info)
-        tloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
+            
+        if disco_mode: tloss = torch.tensor([loc.avg, cls.avg, reg.avg, disco.avg]).unsqueeze(1)
+        else: tloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
         tmetrics = torch.tensor([eventPre.avg, eventRec.avg]).unsqueeze(1)
         tboxmetrics = torch.tensor([boxPreSUEP.avg, boxPreQCD.avg, boxRecSUEP.avg, boxRecQCD.avg]).unsqueeze(1)
         train_loss = torch.cat((train_loss, tloss), 1)
@@ -246,6 +271,7 @@ def execute(rank,
         if verbose:
             tr = trange(len(val_loader), file=sys.stdout)
 
+        disco.reset()
         loc.reset()
         cls.reset()
         reg.reset()
@@ -268,9 +294,21 @@ def execute(rank,
 
             for batch_index, (images, targets) in enumerate(val_loader):
                 outputs = net(images)
-                l, c, r, boxMetricsVal, eventMetricsVal = criterion(outputs, targets)
-                l, c, r = reduce_tensor(l.data, c.data, r.data)
-
+                
+                if disco_mode:
+                    # disco_variable = ntracks
+                    # FIXME: this assumes no tracks overlap on the same pixel,
+                    # roughly true for 500x500 images, but can and should be improved.
+                    # Furthermore, calculating is at this step is a waste of time (how much?)
+                    # might be better to include this information during data generation
+                    ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze()
+                    l, c, r, d, boxMetricsVal, eventMetricsVal = criterion(outputs, targets, torch.Tensor.float(ntracks))
+                    l, c, r, d = reduce_tensor(l.data, c.data, r.data, d.data)
+                    disco.update(d)
+                else:
+                    l, c, r, boxMetricsVal, eventMetricsVal = criterion(outputs, targets)
+                    l, c, r = reduce_tensor(l.data, c.data, r.data)
+                
                 loc.update(l)
                 cls.update(c)
                 reg.update(r)
@@ -281,14 +319,18 @@ def execute(rank,
                 eventPre.update(eventMetricsVal[0])
                 eventRec.update(eventMetricsVal[1])
 
-                info = 'Validation, {}, {}, {}, {}, {}'.format(loc, cls, reg, eventPre, eventRec)
+                if disco_mode:
+                    info = 'Validation, {}, {}, {}, {}, {}, {}'.format(loc, cls, reg, disco, eventPre, eventRec)
+                else:
+                    info = 'Validation, {}, {}, {}, {}, {}'.format(loc, cls, reg, eventPre, eventRec)
                 if verbose:
                     tr.set_description(info)
                     tr.update(1)
 
             if rank == 0:
                 logger.debug(info)
-            vloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
+            if disco_mode: vloss = torch.tensor([loc.avg, cls.avg, reg.avg, disco.avg]).unsqueeze(1)
+            else: vloss = torch.tensor([loc.avg, cls.avg, reg.avg]).unsqueeze(1)
             vmetrics = torch.tensor([eventPre.avg, eventRec.avg]).unsqueeze(1)
             vboxmetrics = torch.tensor([boxPreSUEP.avg, boxPreQCD.avg, boxRecSUEP.avg, boxRecQCD.avg]).unsqueeze(1)
             val_loss = torch.cat((val_loss, vloss), 1)
@@ -297,9 +339,12 @@ def execute(rank,
             if verbose:
                 tr.close()
 
+            keys = ['Localization', 'Classification', 'Regression']
+            if disco_mode: keys.append('Disco')
             plot.draw_loss(train_loss.cpu().numpy(),
                            val_loss.cpu().numpy(),
-                           name)
+                           name,
+                           keys=keys)
             
             plot.draw_metrics(train_metrics,
                            val_metrics,
@@ -331,7 +376,7 @@ def is_first_or_last(layer):
             and layer.out_channels > 4)
 
 
-def reduce_tensor(loc, cls, reg):
+def reduce_tensor(loc, cls, reg, disco=None):
     loc, cls, reg = loc.clone(), cls.clone(), reg.clone()
     dist.all_reduce(loc)
     dist.all_reduce(cls)
@@ -339,6 +384,11 @@ def reduce_tensor(loc, cls, reg):
     loc /= int(os.environ['WORLD_SIZE'])
     cls /= int(os.environ['WORLD_SIZE'])
     reg /= int(os.environ['WORLD_SIZE'])
+    if disco is not None: 
+        disco = disco.clone()
+        dist.all_reduce(disco)
+        disco /= int(os.environ['WORLD_SIZE'])
+        return loc, cls, reg, disco
     return loc, cls, reg
 
 
@@ -378,6 +428,8 @@ if __name__ == '__main__':
                         help='Run with FLOP regularizer')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Output verbosity')
+    parser.add_argument('-d', '--disco-mode', action='store_true',
+                        help='DISCO MODE')
     args = parser.parse_args()
     config = yaml.safe_load(open(args.config))
     net_config = yaml.safe_load(open(args.structure))
@@ -386,7 +438,9 @@ if __name__ == '__main__':
 
     world_size = torch.cuda.device_count()
     print("World size:", world_size)
-
+    
+    if args.disco_mode: cprint("𝅘𝅥𝅮𝅘𝅥𝅮𝅘𝅥𝅮 Disco Mode 𝅘𝅥𝅮𝅘𝅥𝅮𝅘𝅥𝅮", 'white', 'on_magenta')
+        
     mp.spawn(execute,
              args=(world_size,
                    args.name,
@@ -399,6 +453,7 @@ if __name__ == '__main__':
                    net_config['network_channels'],
                    args.pre_trained_model_path,
                    args.flop_regularizer,
-                   args.verbose),
+                   args.verbose,
+                   args.disco_mode),
              nprocs=world_size,
              join=True)
