@@ -8,6 +8,7 @@ from sklearn.metrics import confusion_matrix
 
 from ..box_utils import match, log_sum_exp
 from torch.autograd import Variable
+from .Disco import distance_corr
 
 
 class MultiBoxLoss(nn.Module):
@@ -35,6 +36,7 @@ class MultiBoxLoss(nn.Module):
         self.beta_loc = 1.0
         self.beta_cnf = 1.0
         self.beta_reg = 1.0
+        self.beta_disco = 1000.0
         self.device = torch.device(rank)
         self.defaults = priors.data
         self.n_classes = n_classes
@@ -42,7 +44,7 @@ class MultiBoxLoss(nn.Module):
         self.negpos_ratio = neg_pos
         self.variance = .1
 
-    def forward(self, predictions, targets):
+    def forward(self, predictions, targets, disco_var=None):
         """Multibox loss calculation
         Args:
             predictions: a tuple containing loc preds, cnf preds, reg_preds
@@ -124,10 +126,16 @@ class MultiBoxLoss(nn.Module):
         _, truth = torch.max(one_hot.data, 1)
         cm = confusion_matrix(truth.cpu(), predicted.cpu())
         acc, rec = [], []
-        for i in range(self.n_classes):
-            acc.append((cm[i,i] / sum(cm[:,i])) if sum(cm[:,i]) > 0 else 0)
-            rec.append((cm[i,i] / sum(cm[i,:]))  if sum(cm[i,:]) > 0 else 0)
-            
+        try:
+            for i in range(self.n_classes):
+                acc.append((cm[i,i] / sum(cm[:,i])) if sum(cm[:,i]) > 0 else 0)
+                rec.append((cm[i,i] / sum(cm[i,:]))  if sum(cm[i,:]) > 0 else 0)
+        except:
+            print("Per box metric failed", predicted.cpu(), truth.cpu())
+            for i in range(self.n_classes): 
+                acc.append(0)
+                rec.append(0)
+                
         # per event metrics
         THRESHOLD = 0.3
         hasSUEP = torch.any(cnf_truth == 1, 1)
@@ -137,6 +145,14 @@ class MultiBoxLoss(nn.Module):
         TP = torch.sum(hasSUEP*predSUEP_thresh).data.tolist()
         eventPre = TP / torch.sum(predSUEP_thresh).data.tolist() if torch.sum(predSUEP_thresh) > 0 else 0
         eventRec = TP / torch.sum(hasSUEP).data.tolist() if torch.sum(hasSUEP) > 0 else 0
+        
+        # ABCDisco loss
+        if disco_var is not None:
+            binary_preds = torch.max(probs[:,:,1], axis=1).values
+            trueBkg_preds = binary_preds[~hasSUEP]
+            trueBkg_discoVar = disco_var[~hasSUEP]
+            loss_disco = distance_corr(trueBkg_preds, trueBkg_discoVar)
+            if torch.isnan(loss_disco): loss_disco = torch.cuda.FloatTensor([0.0]).squeeze()
        
         # Compute regression loss
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(reg_data)
@@ -149,4 +165,6 @@ class MultiBoxLoss(nn.Module):
         loss_l /= N
         loss_c /= N
         loss_r /= N
-        return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, [acc, rec], [eventPre, eventRec]
+        loss_disco /= N
+        
+        return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, self.beta_disco*loss_disco, [acc, rec], [eventPre, eventRec]
