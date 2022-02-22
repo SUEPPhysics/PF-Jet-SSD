@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from sklearn.metrics import confusion_matrix
 
 from ..box_utils import match, log_sum_exp
+from ..disco import distance_corr 
 from torch.autograd import Variable
 
 
@@ -56,7 +57,7 @@ class MultiBoxLoss(nn.Module):
             loss_c: classification loss
             loss_r: regression loss
         """
-        loc_data, cnf_data, reg_data = predictions
+        loc_data, cnf1_data, cnf2_data, reg_data = predictions
 
         bs = loc_data.size(0)  # batch size
         n_priors = self.defaults.size(0)  # number of priors
@@ -97,7 +98,7 @@ class MultiBoxLoss(nn.Module):
         loss_l = F.smooth_l1_loss(loc_prediction, loc_truth, reduction='sum')
   
         # Compute max conf across batch for hard negative mining
-        b_conf = cnf_data.view(-1, self.n_classes)
+        b_conf = cnf1_data.view(-1, self.n_classes)
         loss_c = log_sum_exp(b_conf) - b_conf.gather(1, cnf_truth.view(-1, 1))
         loss_c = loss_c.view(bs, -1)
         loss_c[pos] = 0  # filter out pos boxes
@@ -108,19 +109,46 @@ class MultiBoxLoss(nn.Module):
         neg = idx_rank < num_neg.expand_as(idx_rank)
 
         # Confidence Loss Including Positive and Negative Examples
-        pos_idx = pos.unsqueeze(2).expand_as(cnf_data)
-        neg_idx = neg.unsqueeze(2).expand_as(cnf_data)
+        pos_idx = pos.unsqueeze(2).expand_as(cnf1_data)
+        neg_idx = neg.unsqueeze(2).expand_as(cnf1_data)
         cnf_idx = (pos_idx+neg_idx).gt(0)
         trt_idx = (pos+neg).gt(0)
-        cnf_prediction = cnf_data[cnf_idx].view(-1, self.n_classes)
+        cnf1_prediction = cnf1_data[cnf_idx].view(-1, self.n_classes)
         one_hot = F.one_hot(cnf_truth[trt_idx], self.n_classes)
         smooth_target = one_hot*(1-self.alpha) + self.alpha/self.n_classes
-        loss_c = F.binary_cross_entropy_with_logits(cnf_prediction,
-                                                    smooth_target,
-                                                    reduction='sum')
-        
+        loss_c1 = F.binary_cross_entropy_with_logits(cnf1_prediction,
+                                                     smooth_target,
+                                                     reduction='sum')
+
+        # Compute max conf across batch for hard negative mining
+        b_conf = cnf2_data.view(-1, self.n_classes)
+        loss_c = log_sum_exp(b_conf) - b_conf.gather(1, cnf_truth.view(-1, 1))
+        loss_c = loss_c.view(bs, -1)
+        loss_c[pos] = 0  # filter out pos boxes
+        _, loss_idx = loss_c.sort(1, descending=True)
+        _, idx_rank = loss_idx.sort(1)
+        num_pos = pos.long().sum(1, keepdim=True)
+        num_neg = torch.clamp(self.negpos_ratio*num_pos, max=pos.size(1)-1)
+        neg = idx_rank < num_neg.expand_as(idx_rank)
+
+        # Confidence Loss Including Positive and Negative Examples
+        pos_idx = pos.unsqueeze(2).expand_as(cnf2_data)
+        neg_idx = neg.unsqueeze(2).expand_as(cnf2_data)
+        cnf_idx = (pos_idx+neg_idx).gt(0)
+        trt_idx = (pos+neg).gt(0)
+        cnf2_prediction = cnf2_data[cnf_idx].view(-1, self.n_classes)
+        one_hot = F.one_hot(cnf_truth[trt_idx], self.n_classes)
+        smooth_target = one_hot*(1-self.alpha) + self.alpha/self.n_classes
+        loss_c2 = F.binary_cross_entropy_with_logits(cnf2_prediction,
+                                                     smooth_target,
+                                                     reduction='sum')
+
+        var1 = F.softmax(cnf1_prediction, dim=1)[:,2]
+        var2 = F.softmax(cnf2_prediction, dim=1)[:,2]
+        disco = distance_corr(var1, var2, 1)
+       
         # per box metrics
-        _, predicted = torch.max(cnf_prediction.data, 1)
+        _, predicted = torch.max(cnf1_prediction.data, 1)
         _, truth = torch.max(one_hot.data, 1)
         cm = confusion_matrix(truth.cpu(), predicted.cpu())
         acc, rec = [], []
@@ -132,7 +160,7 @@ class MultiBoxLoss(nn.Module):
         THRESHOLD = 0.3
         hasSUEP = torch.any(cnf_truth == 1, 1)
         softmax = torch.nn.Softmax(2)
-        probs = softmax(cnf_data)
+        probs = softmax(cnf1_data)
         predSUEP_thresh = torch.any(probs[:,:,1] > THRESHOLD, 1)        # replaced max for now      
         TP = torch.sum(hasSUEP*predSUEP_thresh).data.tolist()
         eventPre = TP / torch.sum(predSUEP_thresh).data.tolist() if torch.sum(predSUEP_thresh) > 0 else 0
@@ -147,6 +175,7 @@ class MultiBoxLoss(nn.Module):
         # Final normalized losses
         N = num_pos.data.sum().float()
         loss_l /= N
-        loss_c /= N
+        loss_c1 /= N
+        loss_c2 /= N
         loss_r /= N
-        return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, [acc, rec], [eventPre, eventRec]
+        return self.beta_loc*loss_l, self.beta_cnf*loss_c1, self.beta_cnf*loss_c2, self.beta_reg*loss_r, disco, [acc, rec], [eventPre, eventRec]

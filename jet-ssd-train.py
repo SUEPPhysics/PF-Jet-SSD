@@ -27,7 +27,7 @@ from ssd.net import build_ssd
 from ssd.qutils import get_delta, get_alpha, to_ternary
 from utils import AverageMeter, IsValidFile, Plotting, get_data_loader, \
     set_logging
-from torchsummary import summary
+#from torchsummary import summary
 
 
 warnings.filterwarnings(
@@ -90,8 +90,8 @@ def execute(rank,
     if rank == 0:
         logger.debug('SSD architecture:\n{}'.format(str(ssd_net)))
 
-    if verbose: 
-        print(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
+#    if verbose: 
+#        print(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
     
     # Initialize weights
     if trained_model_path:
@@ -99,7 +99,8 @@ def execute(rank,
     else:
         ssd_net.mobilenet.apply(weights_init)
         ssd_net.loc.apply(weights_init)
-        ssd_net.cnf.apply(weights_init)
+        ssd_net.cnf1.apply(weights_init)
+        ssd_net.cnf2.apply(weights_init)
         ssd_net.reg.apply(weights_init)
 
     # Data parallelization
@@ -210,16 +211,15 @@ def execute(rank,
                         # roughly true for 500x500 images, but can and should be improved.
                         # Furthermore, calculating is at this step is a waste of time (how much?)
                         # might be better to include this information during data generation
-                        ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze()
-                        l, c, r, d, boxMetrics, eventMetrics = criterion(outputs, targets, torch.Tensor.float(ntracks))
-                        loss = l + c + r + d + rflop
+                        l, c1, c2, r, d, boxMetrics, eventMetrics = criterion(outputs, targets)
+                        loss = l + c1 + c2 + r + d + rflop
                         disco.update(d)
                     else:
                         l, c, r, boxMetrics, eventMetrics = criterion(outputs, targets)
                         loss = l + c + r + rflop
 
             loc.update(l)
-            cls.update(c)
+            cls.update(c1)
             reg.update(r)
             boxPreSUEP.update(boxMetrics[0][1])
             boxPreQCD.update(boxMetrics[0][2])

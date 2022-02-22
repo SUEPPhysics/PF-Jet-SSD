@@ -30,8 +30,9 @@ class SSD(nn.Module):
         self.rank = rank
         self.mobilenet = nn.ModuleList(base)
         self.loc = nn.ModuleList(head[0])
-        self.cnf = nn.ModuleList(head[1])
-        self.reg = nn.ModuleList(head[2])
+        self.cnf1 = nn.ModuleList(head[1])
+        self.cnf2 = nn.ModuleList(head[2])
+        self.reg = nn.ModuleList(head[3])
         self.n_classes = ssd_settings['n_classes']
         self.top_k = ssd_settings['top_k']
         self.min_confidence = ssd_settings['confidence_threshold']
@@ -65,7 +66,7 @@ class SSD(nn.Module):
 
     def forward_pass(self, x):
         """Applies network layers and ops on input images x"""
-        sources, loc, cnf, reg = list(), list(), list(), list()
+        sources, loc, cnf1, cnf2, reg = list(), list(), list(), list(), list()
         if self.int8:
             x = self.quant(x)
 
@@ -88,15 +89,17 @@ class SSD(nn.Module):
                     sources.append(out)
 
         # Apply multibox head to source layers
-        for (x, l, c, r) in zip(sources, self.loc, self.cnf, self.reg):
-            l, c, r = l(x), c(x), r(x)
+        for (x, l, c1, c2, r) in zip(sources, self.loc, self.cnf1, self.cnf2, self.reg):
+            l, c1, c2, r = l(x), c1(x), c2(x), r(x)
             if self.int8:
-                l, c, r = self.dequant(l), self.dequant(c), self.dequant(r)
+                l, c1, c2, r = self.dequant(l), self.dequant(c1), self.dequant(c2), self.dequant(r)
             loc.append(l.permute(0, 2, 3, 1).contiguous())
-            cnf.append(c.permute(0, 2, 3, 1).contiguous())
+            cnf1.append(c1.permute(0, 2, 3, 1).contiguous())
+            cnf2.append(c2.permute(0, 2, 3, 1).contiguous())
             reg.append(r.permute(0, 2, 3, 1).contiguous())
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
-        cnf = torch.cat([o.view(o.size(0), -1) for o in cnf], 1)
+        cnf1 = torch.cat([o.view(o.size(0), -1) for o in cnf1], 1)
+        cnf2 = torch.cat([o.view(o.size(0), -1) for o in cnf2], 1)
         reg = torch.cat([o.view(o.size(0), -1) for o in reg], 1)
 
         # Apply correct output layer
@@ -107,7 +110,7 @@ class SSD(nn.Module):
             priors = priors.to(torch.device(self.rank))
             output = self.detect.apply(
                 loc.view(loc.size(0), -1, 2),
-                self.softmax(cnf.view(cnf.size(0), -1, self.n_classes)),
+                self.softmax(cnf1.view(cnf1.size(0), -1, self.n_classes)),
                 reg.view(reg.size(0), -1, 1),
                 priors,
                 self.n_classes,
@@ -117,7 +120,8 @@ class SSD(nn.Module):
         else:
             output = (
                 loc.view(loc.size(0), -1, 2),
-                cnf.view(cnf.size(0), -1, self.n_classes),
+                cnf1.view(cnf1.size(0), -1, self.n_classes),
+                cnf2.view(cnf2.size(0), -1, self.n_classes),
                 reg.view(reg.size(0), -1, 1))
         return output
 
@@ -185,7 +189,7 @@ def mobile_net_v1(c, net_channels, int8, inference):
 
 
 def multibox(n_classes, net_channels, inference):
-    loc, cnf, reg = [], [], []
+    loc, cnf1, cnf2, reg = [], [], [], []
 
     if inference:
         source_channels = [net_channels[-3]]
@@ -194,10 +198,11 @@ def multibox(n_classes, net_channels, inference):
 
     for c in source_channels:
         loc += [nn.Conv2d(c, 2, kernel_size=3, padding=1, bias=False)]
-        cnf += [nn.Conv2d(c, n_classes, kernel_size=3, padding=1, bias=False)]
+        cnf1 += [nn.Conv2d(c, n_classes, kernel_size=3, padding=1, bias=False)]
+        cnf2 += [nn.Conv2d(c, n_classes, kernel_size=3, padding=1, bias=False)]
         reg += [nn.Conv2d(c, 1, kernel_size=3, padding=1, bias=False)]
 
-    return (loc, cnf, reg)
+    return (loc, cnf1, cnf2, reg)
 
 
 def build_ssd(rank,

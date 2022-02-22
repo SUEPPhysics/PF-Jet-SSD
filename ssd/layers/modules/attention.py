@@ -9,7 +9,7 @@ class AttentionLayer(nn.Module):
         super(AttentionLayer, self).__init__()
 
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.conv1d = nn.Conv1d(1, 1, 3, padding=1, bias=False, device=device)
+        self.conv1d = nn.Conv1d(1, 1, 3, padding=1, bias=False).to(device)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
