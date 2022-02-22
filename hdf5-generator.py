@@ -139,6 +139,7 @@ class HDF5Generator:
 
                 # Flatten the labels array and write it to the dataset
                 hdf5_labels[i] = np.hstack(labels)
+                
 
                 hdf5_PFCand_Eta[i] = px_eta
                 hdf5_PFCand_Phi[i] = px_phi
@@ -205,17 +206,16 @@ class HDF5Generator:
                        suep_phi: int) -> Optional[list]:
         """Returns labels for suep"""
         
-        pt = sum(pts)
-        if pt == 0:
-            return None
+        if len(pts) == 0: return None
 
-        # calculate mass
+        # calculate pt and mass
         tracks = vector.array({
             "eta": etas, "phi": phis, "pt": pts, "M": mass
         })
         SUEP = vector.obj(px=0,py=0,pz=0,E=0)
         for track in tracks: SUEP = SUEP + track
         m = SUEP.mass
+        pt = SUEP.pt
         
         return [1, self.eta_to_pixel(suep_eta), self.phi_to_pixel(suep_phi), pt, m]
 
