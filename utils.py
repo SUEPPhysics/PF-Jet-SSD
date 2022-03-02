@@ -226,42 +226,40 @@ class Plotting():
         plt.close(fig)
         return results_ap, results_pr3, results_pr5
 
-#     def draw_precision_recall(self,
-#                               jet_names,
-#                               results_base=None,
-#                               results_fpn=None,
-#                               results_twn=None,
-#                               results_int8=None):
-#         """Plots the precision recall curve"""
-
-#         fig, ax = plt.subplots()
-#         for i, results in enumerate([results_base,
-#                                      results_fpn,
-#                                      results_twn,
-#                                      results_int8]):
-            
-#             if results is None: continue
-                        
-#             name = self.legend[i]
-#             for j, jet in enumerate(jet_names):
-#                 score = results[j][:, 3].numpy()
-#                 truth = results[j][:, 4].numpy()
-#                 precision, recall, _ = precision_recall_curve(truth, score)
-#                 ap = self.average_precision_score(truth, score)
-#                 label = '{0}: {1} jets, AP: {2:.3f}'.format(name, jet, ap)
-#                 plt.plot(recall[1:],
-#                          precision[1:],
-#                          linestyle=self.line_styles[j],
-#                          color=self.colors[i],
-#                          label=label)
-
-#         plt.xlabel('Recall (TPR)', horizontalalignment='right', x=1.0)
-#         plt.ylabel('Precision (PPV)', horizontalalignment='right', y=1.0)
-#         plt.xticks([0.2, 0.4, 0.6, 0.8, 1])
-#         plt.yticks([0.2, 0.4, 0.6, 0.8, 1])
-#         ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
-#         fig.savefig('{}/precision-recall-curve'.format(self.save_dir))
-#         plt.close(fig)
+    def draw_disco(self, results, net, label):
+        """ Plots results for single disco """
+        
+        results = results.cpu().numpy()
+        
+        with open('plots/test.npy', 'wb') as f:
+            np.save(f, results)
+        
+        fig = plt.figure(figsize=(10, 5))
+        ax, ax2 = fig.subplots(1,2)
+        ax.set_xlabel(label)
+        ax.set_ylabel("Classifier Output")
+        ax2.set_xlabel(label)
+        ax2.set_ylabel("Classifier Output")
+        ax.set_title("SUEP")
+        ax2.set_title("QCD")
+        ax.set_xlim(0,500)
+        ax2.set_xlim(0,500)
+        ax.set_ylim(0,1)
+        ax2.set_ylim(0,1)
+        
+        suep_ntracks = results[results[:,2] == 1][:,1]
+        suep_cl = results[results[:,2] == 1][:,0]
+        qcd_ntracks = results[results[:,2] == 0][:,1]
+        qcd_cl = results[results[:,2] == 0][:,0]
+        
+        ax.hist2d(suep_ntracks, suep_cl, bins=[100,20], label='SUEP')
+        ax2.hist2d(qcd_ntracks, qcd_cl, bins=[100,20], label='QCD')
+        
+        fig.tight_layout()
+        fig.suptitle("Model: "+net)
+        
+        fig.savefig('{}/single-disco-reults-{}.png'.format(self.save_dir, net))
+        plt.close(fig)
 
     def draw_precision_details(self, gt, fpn, twn, int8, jet_names, nbins=11):
         """Plots the precision histogram at fixed recall"""

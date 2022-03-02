@@ -153,7 +153,7 @@ class MultiBoxLoss(nn.Module):
             trueBkg_discoVar = disco_var[~hasSUEP]
             loss_disco = distance_corr(trueBkg_preds, trueBkg_discoVar)
             if torch.isnan(loss_disco): loss_disco = torch.cuda.FloatTensor([0.0]).squeeze()
-       
+     
         # Compute regression loss
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(reg_data)
         reg_prediction = reg_data[pos_idx].view(-1, 1)
@@ -165,6 +165,8 @@ class MultiBoxLoss(nn.Module):
         loss_l /= N
         loss_c /= N
         loss_r /= N
-        loss_disco /= N
         
-        return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, self.beta_disco*loss_disco, [acc, rec], [eventPre, eventRec]
+        if disco_var is not None:
+            return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, self.beta_disco*loss_disco, [acc, rec], [eventPre, eventRec]
+        else:
+            return self.beta_loc*loss_l, self.beta_cnf*loss_c, self.beta_reg*loss_r, [acc, rec], [eventPre, eventRec]

@@ -30,6 +30,7 @@ def execute(model,
 
     results = [torch.empty(0, 6).cpu() for _ in range(num_classes)]
     deltas = torch.empty((0, 5))
+    disco_results = torch.empty(0,3)
 
     if verbose:
         progress_bar = tqdm(total=len(dataset), desc=text)
@@ -64,7 +65,15 @@ def execute(model,
 
             # Sort by confidence
             all_detections = all_detections[(-all_detections[:, 3]).argsort()]
-
+            
+            # event wide binary classification
+            predSUEP = torch.max(all_detections[:,3][all_detections[:,2] == 1], axis=-1).values
+            
+            # disco variable
+            ntracks = torch.sum(torch.any(X[i] > 0,axis=-1), axis=-1).squeeze()
+            disco_var = ntracks
+            disco_results = torch.cat((disco_results, torch.stack((predSUEP, disco_var, torch.any(targets[:,4] == 1))).unsqueeze(0)))
+            
             for t in targets:
                 detected = False
                 tx = (t[0]+t[2])/2
@@ -110,7 +119,7 @@ def execute(model,
     if args.verbose:
         progress_bar.close()
 
-    return results, deltas.cpu()
+    return results, deltas.cpu(), disco_results
 
 
 def execute_baseline(dataset,
@@ -221,6 +230,7 @@ if __name__ == '__main__':
 
     plotting_results = []
     plotting_deltas = []
+    plotting_discos = []
 
     logger = set_logging('Test_SSD',
                          '{}/PF-Jet-SSD-Test.log'.format(
@@ -298,7 +308,7 @@ if __name__ == '__main__':
                                  return_scaler=True)
 
         with torch.no_grad():
-            results, deltas = execute(net,
+            results, deltas, disco = execute(net,
                                       loader,
                                       input_dimensions[1:],
                                       jet_size,
@@ -311,6 +321,7 @@ if __name__ == '__main__':
 
         plotting_results.append(results)
         plotting_deltas.append(deltas)
+        plotting_discos.append(disco)
 
     plot = Plotting(save_dir=config['output']['plots'])
 
@@ -320,6 +331,7 @@ if __name__ == '__main__':
                                               plotting_results[2],
                                               jet_names)
     
+    plot.draw_disco(plotting_discos[0], 'fpn', '# Tracks')
     
     models = ['Baseline', 'FPN', 'TWN', 'INT8']
     for i, (jap, jpr3, jpr5, name) in enumerate(zip(ap, pr3, pr5, models)):

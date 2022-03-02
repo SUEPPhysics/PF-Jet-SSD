@@ -89,9 +89,7 @@ def execute(rank,
         torch.quantization.prepare_qat(ssd_net, inplace=True)
     if rank == 0:
         logger.debug('SSD architecture:\n{}'.format(str(ssd_net)))
-
-    if verbose: 
-        print(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
+        logger.debug(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
     
     # Initialize weights
     if trained_model_path:
