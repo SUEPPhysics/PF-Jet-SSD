@@ -26,11 +26,12 @@ def execute(model,
             num_classes=2,
             epsilon=10**-6,
             text='Evaluating Network',
+            disco=False,
             verbose=False):
 
     results = [torch.empty(0, 6).cpu() for _ in range(num_classes)]
     deltas = torch.empty((0, 5))
-    disco_results = torch.empty(0,3)
+    if disco: disco_results = torch.empty(0,3)
 
     if verbose:
         progress_bar = tqdm(total=len(dataset), desc=text)
@@ -66,13 +67,14 @@ def execute(model,
             # Sort by confidence
             all_detections = all_detections[(-all_detections[:, 3]).argsort()]
             
-            # event wide binary classification
-            predSUEP = torch.max(all_detections[:,3][all_detections[:,2] == 1], axis=-1).values
-            
-            # disco variable
-            ntracks = torch.sum(torch.any(X[i] > 0,axis=-1), axis=-1).squeeze()
-            disco_var = ntracks
-            disco_results = torch.cat((disco_results, torch.stack((predSUEP, disco_var, torch.any(targets[:,4] == 1))).unsqueeze(0)))
+            if disco:
+                # event wide binary classification
+                predSUEP = torch.max(all_detections[:,3][all_detections[:,2] == 1], axis=-1).values
+
+                # disco variable
+                ntracks = torch.sum(torch.any(X[i] > 0,axis=-1), axis=-1).squeeze()
+                disco_var = ntracks
+                disco_results = torch.cat((disco_results, torch.stack((predSUEP, disco_var, torch.any(targets[:,4] == 1))).unsqueeze(0)))
             
             for t in targets:
                 detected = False
@@ -119,7 +121,10 @@ def execute(model,
     if args.verbose:
         progress_bar.close()
 
-    return results, deltas.cpu(), disco_results
+    if disco:
+        return results, deltas.cpu(), disco_results
+    else:
+        return results, deltas.cpu(), None
 
 
 def execute_baseline(dataset,
@@ -210,6 +215,8 @@ if __name__ == '__main__':
                         help='Path to config file', default='net-config.yml')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Output verbosity')
+    parser.add_argument('-d', '--disco', action='store_true',
+                        help='Disco mode')
     args = parser.parse_args()
     config = yaml.safe_load(open(args.config))
     net_config = yaml.safe_load(open(args.structure))
@@ -316,6 +323,7 @@ if __name__ == '__main__':
                                       batch_size=batch_size,
                                       max_distance=max_distance,
                                       num_classes=num_classes,
+                                      disco=args.disco,
                                       text='Evaluating {}'.format(name),
                                       verbose=args.verbose)
 
@@ -331,7 +339,7 @@ if __name__ == '__main__':
                                               plotting_results[2],
                                               jet_names)
     
-    plot.draw_disco(plotting_discos[0], 'fpn', '# Tracks')
+    if args.disco: plot.draw_disco(plotting_discos[0], 'fpn', '# Tracks')
     
     models = ['Baseline', 'FPN', 'TWN', 'INT8']
     for i, (jap, jpr3, jpr5, name) in enumerate(zip(ap, pr3, pr5, models)):
