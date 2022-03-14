@@ -89,7 +89,7 @@ def execute(rank,
         torch.quantization.prepare_qat(ssd_net, inplace=True)
     if rank == 0:
         logger.debug('SSD architecture:\n{}'.format(str(ssd_net)))
-        logger.debug(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
+        # logger.debug(summary(ssd_net, input_size=(1,ssd_settings['input_dimensions'][1],ssd_settings['input_dimensions'][2])))
     
     # Initialize weights
     if trained_model_path:
@@ -127,7 +127,8 @@ def execute(rank,
     criterion = MultiBoxLoss(rank,
                              priors,
                              ssd_settings['n_classes'],
-                             min_overlap=ssd_settings['overlap_threshold'])
+                             min_overlap=ssd_settings['overlap_threshold'],
+                             beta_disco=ssd_settings['beta_disco'] if disco_mode else 1.0)
     scaler = GradScaler()
     verobse = verbose and rank == 0
     train_loss, val_loss = torch.empty(3 + int(disco_mode), 0), torch.empty(3 + int(disco_mode), 0)
@@ -208,8 +209,8 @@ def execute(rank,
                         # roughly true for 500x500 images, but can and should be improved.
                         # Furthermore, calculating is at this step is a waste of time (how much?)
                         # might be better to include this information during data generation
-                        ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze()
-                        l, c, r, d, boxMetrics, eventMetrics = criterion(outputs, targets, torch.Tensor.float(ntracks))
+                        ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze().float() 
+                        l, c, r, d, boxMetrics, eventMetrics = criterion(outputs, targets, ntracks)
                         loss = l + c + r + d + rflop
                         disco.update(d)
                     else:
@@ -438,7 +439,7 @@ if __name__ == '__main__':
     print("World size:", world_size)
     
     if args.disco_mode: cprint("𝅘𝅥𝅮𝅘𝅥𝅮𝅘𝅥𝅮 Disco Mode 𝅘𝅥𝅮𝅘𝅥𝅮𝅘𝅥𝅮", 'white', 'on_magenta')
-        
+    
     mp.spawn(execute,
              args=(world_size,
                    args.name,

@@ -29,14 +29,15 @@ class MultiBoxLoss(nn.Module):
                  priors,
                  n_classes,
                  min_overlap=0.5,
-                 neg_pos=3):
+                 neg_pos=3,
+                 beta_disco=1.0):
         super(MultiBoxLoss, self).__init__()
 
         self.alpha = 0.1
         self.beta_loc = 1.0
         self.beta_cnf = 1.0
         self.beta_reg = 1.0
-        self.beta_disco = 1000.0
+        self.beta_disco = beta_disco
         self.device = torch.device(rank)
         self.defaults = priors.data
         self.n_classes = n_classes
@@ -151,15 +152,16 @@ class MultiBoxLoss(nn.Module):
             binary_preds = torch.max(probs[:,:,1], axis=1).values
             trueBkg_preds = binary_preds[~hasSUEP]
             trueBkg_discoVar = disco_var[~hasSUEP]
-            loss_disco = distance_corr(trueBkg_preds, trueBkg_discoVar)
-            if torch.isnan(loss_disco): loss_disco = torch.cuda.FloatTensor([0.0]).squeeze()
+            loss_disco = distance_corr(trueBkg_preds, trueBkg_discoVar).to(self.device)
+            if torch.isnan(loss_disco):
+                loss_disco = torch.cuda.FloatTensor([0.0]).squeeze().to(self.device)
      
         # Compute regression loss
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(reg_data)
         reg_prediction = reg_data[pos_idx].view(-1, 1)
         reg_truth = reg_truth[pos_idx].view(-1, 1)
         loss_r = F.smooth_l1_loss(reg_prediction, reg_truth, reduction='sum')
-
+        
         # Final normalized losses
         N = num_pos.data.sum().float()
         loss_l /= N

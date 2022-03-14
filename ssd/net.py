@@ -73,6 +73,11 @@ class SSD(nn.Module):
         for i, layer in enumerate(self.mobilenet):
             x = layer(x)
             if i == 11:
+                
+                # feature map eta == 'size of image at i = 11/14' == x.shape here
+                # steps = image width / feature_map
+                # print(x.shape)
+                
                 if self.int8 or self.ceva:
                     sources.append(x)
                 else:
@@ -80,6 +85,11 @@ class SSD(nn.Module):
                     out = self.attention1(out)
                     sources.append(out)
             if i == 14:
+                
+                # feature map eta == 'size of image at i = 11/14' == x.shape here
+                # steps = image width / feature_map
+                # print(x.shape)
+                
                 if self.int8:
                     sources.append(x)
                 else:
