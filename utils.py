@@ -231,10 +231,10 @@ class Plotting():
         
         results = results.cpu().numpy()
         
-        with open('plots/test.npy', 'wb') as f:
+        with open('{}/disco_results.npy'.format(self.save_dir), 'wb') as f:
             np.save(f, results)
         
-        fig = plt.figure(figsize=(10, 5))
+        fig = plt.figure(figsize=(7, 3))
         ax, ax2 = fig.subplots(1,2)
         ax.set_xlabel(label)
         ax.set_ylabel("Classifier Output")

@@ -59,8 +59,9 @@ def execute(rank,
         logger = set_logging('Train_SSD', logname, verbose)
 
     ssd_settings['n_classes'] += 1
-    plot = Plotting(save_dir=output['plots'])
-
+    save_dir = output['plots'] + "/" + name + "/"
+    plot = Plotting(save_dir=save_dir)
+    
     # Initialize dataset
     train_loader = get_data_loader(dataset['train'][rank],
                                    training_pref['batch_size_train'],
@@ -439,6 +440,13 @@ if __name__ == '__main__':
     print("World size:", world_size)
     
     if args.disco_mode: cprint("𝅘𝅥𝅮𝅘𝅥𝅮𝅘𝅥𝅮 Disco Mode 𝅘𝅥𝅮𝅘𝅥𝅮𝅘𝅥𝅮", 'white', 'on_magenta')
+    
+    # create a directory to contain all the training plots with the name of the model
+    save_dir = config['output']['plots'] + "/" + args.name + "/"
+    if not os.path.isdir(save_dir): os.system("mkdir " + save_dir)
+    
+    # and copy the configuration file into it
+    os.system("cp " + args.config + " " + save_dir)
     
     mp.spawn(execute,
              args=(world_size,
