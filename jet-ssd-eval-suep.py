@@ -122,7 +122,10 @@ def execute(model,
         progress_bar.close()
 
     if disco:
-        return results, deltas.cpu(), disco_results
+        
+        # debug
+        #return results, deltas.cpu(), disco_results
+        return results, deltas.cpu(), None
     else:
         return results, deltas.cpu(), None
 
@@ -313,9 +316,14 @@ if __name__ == '__main__':
                                  return_pt=True,
                                  shuffle=False,
                                  return_scaler=True)
+        
+        save_dir = config['output']['plots'] + "/" + args.fpn + "/"
+        
+        if not os.path.isdir(save_dir): os.system("mkdir " + save_dir)
+        plot = Plotting(save_dir=save_dir)
 
         with torch.no_grad():
-            results, deltas, disco = execute(net,
+            results, deltas, discos = execute(net,
                                       loader,
                                       input_dimensions[1:],
                                       jet_size,
@@ -329,9 +337,7 @@ if __name__ == '__main__':
 
         plotting_results.append(results)
         plotting_deltas.append(deltas)
-        plotting_discos.append(disco)
-
-    plot = Plotting(save_dir=config['output']['plots'])
+        plotting_discos.append(discos)
 
     ap, pr3, pr5 = plot.draw_precision_recall(base_results,
                                               plotting_results[0],

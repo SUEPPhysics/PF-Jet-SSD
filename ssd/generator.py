@@ -1,6 +1,7 @@
 import h5py
 import torch
 import torch.cuda as tcuda
+import numpy as np
 
 from ssd import qutils
 
@@ -17,7 +18,8 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
                  raw=False,
                  return_baseline=False,
                  return_pt=False,
-                 return_scaler=False):
+                 return_scaler=False,
+                 return_ntracks=False):
         """Generator for calorimeter and jet data"""
 
         self.rank = rank
@@ -32,6 +34,7 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
         self.return_baseline = return_baseline
         self.return_pt = return_pt
         self.return_scaler = return_scaler
+        self.return_ntracks = return_ntracks
 
     def __getitem__(self, index):
 
@@ -40,10 +43,12 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
 
         idx_PFCand_Eta = tcuda.LongTensor([self.PFCand_Eta[index]],
                                            device=self.rank)
-        idx_PFCand_Phi = tcuda.LongTensor([self.PFCand_Phi[index]],
+        idx_PFCand_Phi = tcuda.LongTensor(np.array([self.PFCand_Phi[index]]),
                                            device=self.rank)
         val_PFCand_PT = tcuda.FloatTensor(self.PFCand_PT[index],
                                            device=self.rank)
+
+        ntracks = tcuda.FloatTensor([len(self.PFCand_Eta[index])], device=self.rank)
 
         calorimeter, scaler = self.process_images(idx_PFCand_Eta,
                                                   idx_PFCand_Phi,
@@ -72,6 +77,9 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
             
         if self.return_scaler:
             return calorimeter, labels, scaler
+
+        if self.return_ntracks:
+            return calorimeter, labels, ntracks
 
         if self.return_baseline:
             base = tcuda.FloatTensor(self.base[index], device=self.rank)

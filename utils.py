@@ -562,7 +562,8 @@ def get_data_loader(hdf5_source_path,
                     return_baseline=False,
                     return_pt=False,
                     shuffle=True,
-                    return_scaler=False):
+                    return_scaler=False,
+                    return_ntracks=False):
     dataset = CalorimeterJetDataset(torch.device(rank),
                                     hdf5_source_path,
                                     input_dimensions,
@@ -572,7 +573,8 @@ def get_data_loader(hdf5_source_path,
                                     raw=raw,
                                     return_baseline=return_baseline,
                                     return_pt=return_pt,
-                                    return_scaler=return_scaler)
+                                    return_scaler=return_scaler,
+                                    return_ntracks=return_ntracks)
     return DataLoader(dataset,
                       batch_size=batch_size,
                       collate_fn=collate_fn,

@@ -71,7 +71,8 @@ def execute(rank,
                                    rank,
                                    flip_prob=0.5,
                                    shuffle=True,
-                                   return_pt=True)
+                                   return_pt=True,
+                                   return_ntracks=True)
 
     val_loader = get_data_loader(dataset['validation'][rank],
                                  training_pref['batch_size_validation'],
@@ -80,7 +81,8 @@ def execute(rank,
                                  ssd_settings['object_size'],
                                  rank,
                                  shuffle=False,
-                                 return_pt=True)
+                                 return_pt=True,
+                                 return_ntracks=True)
 
     # Build SSD network
     ssd_net = build_ssd(rank, ssd_settings, net_channels, int8=int8)
@@ -180,7 +182,7 @@ def execute(rank,
                     m.weight.delta = delta
                     m.weight.alpha = get_alpha(m.weight.data, delta)
 
-        for batch_index, (images, targets) in enumerate(train_loader):
+        for batch_index, (images, targets, ntracks) in enumerate(train_loader):
 
             # Ternarize weights
             if ternary:
@@ -210,8 +212,8 @@ def execute(rank,
                         # roughly true for 500x500 images, but can and should be improved.
                         # Furthermore, calculating is at this step is a waste of time (how much?)
                         # might be better to include this information during data generation
-                        ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze().float() 
-                        l, c, r, d, boxMetrics, eventMetrics = criterion(outputs, targets, ntracks)
+                     
+                        l, c, r, d, boxMetrics, eventMetrics = criterion(outputs, targets, torch.cat(ntracks))
                         loss = l + c + r + d + rflop
                         disco.update(d)
                     else:
@@ -292,7 +294,7 @@ def execute(rank,
                         m.weight.org = m.weight.data.clone()
                         m.weight.data = to_ternary(m.weight.data)
 
-            for batch_index, (images, targets) in enumerate(val_loader):
+            for batch_index, (images, targets, ntracks) in enumerate(val_loader):
                 outputs = net(images)
                 
                 if disco_mode:
@@ -301,8 +303,7 @@ def execute(rank,
                     # roughly true for 500x500 images, but can and should be improved.
                     # Furthermore, calculating is at this step is a waste of time (how much?)
                     # might be better to include this information during data generation
-                    ntracks = torch.sum(torch.any(images > 0,axis=-1), axis=-1).squeeze()
-                    l, c, r, d, boxMetricsVal, eventMetricsVal = criterion(outputs, targets, torch.Tensor.float(ntracks))
+                    l, c, r, d, boxMetricsVal, eventMetricsVal = criterion(outputs, targets, torch.cat(ntracks))
                     l, c, r, d = reduce_tensor(l.data, c.data, r.data, d.data)
                     disco.update(d)
                 else:
