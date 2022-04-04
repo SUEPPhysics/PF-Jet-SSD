@@ -75,11 +75,14 @@ class CalorimeterJetDataset(torch.utils.data.Dataset):
             labels = labels.cpu()
             scaler = scaler.cpu()
             
-        if self.return_scaler:
+        if self.return_scaler and not self.return_ntracks:
             return calorimeter, labels, scaler
 
-        if self.return_ntracks:
+        if self.return_ntracks and not self.return_scaler:
             return calorimeter, labels, ntracks
+        
+        if self.return_ntracks and self.return_scaler:
+            return calorimeter, labels, scaler, ntracks
 
         if self.return_baseline:
             base = tcuda.FloatTensor(self.base[index], device=self.rank)

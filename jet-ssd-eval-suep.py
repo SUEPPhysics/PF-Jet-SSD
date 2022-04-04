@@ -36,7 +36,7 @@ def execute(model,
     if verbose:
         progress_bar = tqdm(total=len(dataset), desc=text)
     
-    for X, y, scalers in dataset:
+    for X, y, scalers, ntracks in dataset:
 
         y_pred = model(X).data
         for i in range(batch_size):
@@ -72,8 +72,8 @@ def execute(model,
                 predSUEP = torch.max(all_detections[:,3][all_detections[:,2] == 1], axis=-1).values
 
                 # disco variable
-                ntracks = torch.sum(torch.any(X[i] > 0,axis=-1), axis=-1).squeeze()
-                disco_var = ntracks
+                disco_var = ntracks[i].squeeze()
+                
                 disco_results = torch.cat((disco_results, torch.stack((predSUEP, disco_var, torch.any(targets[:,4] == 1))).unsqueeze(0)))
             
             for t in targets:
@@ -122,10 +122,7 @@ def execute(model,
         progress_bar.close()
 
     if disco:
-        
-        # debug
-        #return results, deltas.cpu(), disco_results
-        return results, deltas.cpu(), None
+        return results, deltas.cpu(), disco_results
     else:
         return results, deltas.cpu(), None
 
@@ -315,7 +312,8 @@ if __name__ == '__main__':
                                  return_baseline=False,
                                  return_pt=True,
                                  shuffle=False,
-                                 return_scaler=True)
+                                 return_scaler=True,
+                                 return_ntracks=True)
         
         save_dir = config['output']['plots'] + "/" + args.fpn + "/"
         
