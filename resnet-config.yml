@@ -1,0 +1,49 @@
+---
+dataset:
+ train:
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_0.h5
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_1.h5
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_2.h5
+ validation:
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_3.h5
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_4.h5
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_5.h5
+ test:
+  - /home/submit/lavezzo/ssd_data/h5/SUEPPhysicsSSD_6.h5
+ size:
+  - 30000
+  - 30000
+  - 30000
+  - 10000
+  - 10000
+  - 10000
+  - 100000
+
+output:
+ model: ./models
+ plots: ./plots
+
+training_pref:
+ batch_size_train: 75
+ batch_size_validation: 100
+ max_epochs: 100
+ learning_rate: 0.001
+ momentum: .9
+ patience: 50
+ reg_strength: 0.00000000001
+ weight_decay: 0.0005
+ workers: 0
+
+evaluation_pref:
+ batch_size: 50
+ names_classes:
+  - 'SUEP'
+  - 'QCD'
+ workers: 0
+ 
+resnet_settings:
+ input_dimensions:
+  - 1
+  - 280
+  - 360
+ n_classes: 2
